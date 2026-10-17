@@ -18,3 +18,17 @@ def test_create_and_view_watch(settings):
                                             "fim": "2027-03-25"})
         assert bad.status_code == 400 and "Aeroporto inválido" in bad.text
         assert client.get("/watches/999").status_code == 404
+
+
+def test_update_targets(settings):
+    with TestClient(create_app(settings)) as client:
+        resp = client.post("/watches", data={"origem": "GRU", "destino": "LIS", "inicio": "2027-03-01",
+                                             "fim": "2027-03-25"}, follow_redirects=False)
+        url = resp.headers["location"]
+        r = client.post(f"{url}/metas", data={"meta_dinheiro": "3.900,00", "meta_milhas": "120.000"},
+                        follow_redirects=False)
+        assert r.status_code == 303
+        db = client.app.state.db
+        w = db.get_watch(int(url.rsplit("/", 1)[1]))
+        assert (w.target_cash_brl, w.target_miles) == (3900.0, 120000)
+        assert "Alertas de preço baixo" in client.get(url).text

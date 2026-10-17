@@ -174,6 +174,7 @@ class Analysis:
     best_miles: list[Trip] = field(default_factory=list)
     best_overall: list[Trip] = field(default_factory=list)
     suggestions: list[Trip] = field(default_factory=list)
+    fewest_miles: Trip | None = None  # viagem na janela com menos milhas
     calendar: list[dict] = field(default_factory=list)
     miles_value: list[dict] = field(default_factory=list)
     trend: dict = field(default_factory=dict)

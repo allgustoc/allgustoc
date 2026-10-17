@@ -1,6 +1,7 @@
 from datetime import date
 
-from radar.analyzer import analyze, deal_flags
+from radar.alerts import evaluate
+from radar.analyzer import analyze
 from radar.models import FareKind, FareQuote
 
 
@@ -47,7 +48,7 @@ def test_suggestions_outside_window(watch, settings):
     s = a.suggestions[0]
     assert s.outbound.date == date(2027, 2, 22) and s.cost_brl == 3000
     assert abs(s.saving_vs_window - 0.5) < 1e-9
-    assert "Datas fora da janela bem mais baratas" in deal_flags(a, settings)
+    assert "sugestao" in {al.rule for al in evaluate(a, settings)}
 
 
 def test_one_way_and_max_stops(watch, settings):
@@ -74,11 +75,6 @@ def test_miles_value_and_trend(watch, settings):
     assert mv["program"] == "smiles" and mv["median_value"] == 30.0
     assert mv["verdict"] == "Vale muito a pena usar milhas"
     assert a.trend["cash"]["is_record"] and a.trend["cash"]["pct"] < 0
-    flags = deal_flags(a, settings)
-    assert any("Menor preço" in f for f in flags)
+    assert "recorde" in {al.rule for al in evaluate(a, settings)}
 
 
-def test_targets(watch, settings):
-    watch.target_cash_brl = 5000
-    quotes = [cash("GRU", "LIS", date(2027, 3, 2), 2000), cash("LIS", "GRU", date(2027, 3, 12), 2000)]
-    assert any("meta" in f for f in deal_flags(analyze(watch, quotes, settings), settings))

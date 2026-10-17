@@ -79,6 +79,22 @@ def cmd_toggle(args, settings, db, active: bool) -> int:
     return 0 if ok else 1
 
 
+def cmd_targets(args, settings, db) -> int:
+    watch = db.get_watch(args.id)
+    if not watch:
+        print("Radar não encontrado")
+        return 1
+    cash = watch.target_cash_brl if args.dinheiro is None else (args.dinheiro or None)
+    miles = watch.target_miles if args.milhas is None else (args.milhas or None)
+    db.update_targets(watch.id, cash, miles)
+    cash_txt = f"R$ {cash:,.0f}".replace(",", ".") if cash else "—"
+    miles_txt = f"{miles:,}".replace(",", ".") if miles else "—"
+    print(f"Metas do radar #{watch.id}: dinheiro {cash_txt} · milhas {miles_txt} (por pessoa, ida e volta)")
+    for alert in db.list_alerts(watch.id, limit=args.historico):
+        print(f"  {alert['sent_at'][:16].replace('T', ' ')}  {alert['message']}")
+    return 0
+
+
 def cmd_remove(args, settings, db) -> int:
     ok = db.delete_watch(args.id)
     print("Radar removido" if ok else "Radar não encontrado")
@@ -182,6 +198,13 @@ def build_parser() -> argparse.ArgumentParser:
     r = sub.add_parser("remove", help="Excluir radar")
     r.add_argument("id", type=int)
     r.set_defaults(func=cmd_remove)
+
+    m = sub.add_parser("meta", help="Definir metas de preço (alerta) de um radar e ver alertas enviados")
+    m.add_argument("id", type=int)
+    m.add_argument("--dinheiro", type=float, help="R$ por pessoa, ida e volta (0 remove)")
+    m.add_argument("--milhas", type=int, help="Milhas por pessoa, ida e volta (0 remove)")
+    m.add_argument("--historico", type=int, default=10, help="Quantos alertas enviados listar")
+    m.set_defaults(func=cmd_targets)
 
     run = sub.add_parser("run", help="Buscar agora (todos os radares ativos ou --id)")
     run.add_argument("--id", type=int, action="append")

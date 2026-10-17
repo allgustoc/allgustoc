@@ -23,8 +23,12 @@ combinação e sugere **datas fora da sua janela** que estejam bem mais baratas.
   padrão) e avisa quando uma combinação fica pelo menos 12% mais barata que a melhor opção da janela.
 - **Termômetro de preço:** compara o melhor preço de hoje com a mediana das últimas buscas do próprio
   radar e destaca o menor preço já visto, quedas de 10% ou mais e metas atingidas.
-- **Avisos** por Telegram e/ou e-mail: um resumo diário, ou só quando houver oportunidade
-  (`RADAR_NOTIFY=deals`).
+- **Alertas de preço baixo** (como no Voe Livre e no Google Flights): defina uma meta em R$ e/ou em
+  milhas por radar e receba um aviso 🚨 quando ela for atingida, quando aparecer o menor preço já visto,
+  quando o preço cair 10% abaixo da média ou quando surgir uma data fora da janela bem mais barata. O
+  mesmo alerta não se repete todo dia: só volta se o preço cair mais 3% ou depois de 7 dias.
+- **Avisos** por Telegram e/ou e-mail: alertas sempre, mais um resumo diário (`RADAR_NOTIFY=digest`) ou
+  só os alertas (`RADAR_NOTIFY=deals`).
 - **Painel web** para cadastrar radares e ver ranking, sugestões, calendário de preços e histórico.
 
 ## Começo rápido (modo demonstração)
@@ -95,6 +99,7 @@ radar add --origem GRU --destino LIS,OPO --inicio 2027-04-01 --fim 2027-04-30 \
 radar add --origem REC --destino ES --inicio 01/09/2027 --fim 30/09/2027 --so-ida
 radar list
 radar report 1        # resumo atual sem fazer novas buscas
+radar meta 1 --dinheiro 4200 --milhas 110000   # metas de alerta (0 remove); lista os alertas enviados
 radar pause 1 / radar resume 1 / radar remove 1
 radar fontes          # fontes disponíveis e quais estão ativas
 ```
@@ -102,7 +107,8 @@ radar fontes          # fontes disponíveis e quais estão ativas
 - `--inicio` e `--fim`: primeiro e último dia da viagem (a ida sai a partir de `inicio`; a volta chega
   até `fim`).
 - `--noites`: duração da viagem (`10-18`, ou `14` para exatamente 14).
-- Metas valem **por pessoa, ida e volta**.
+- Metas valem **por pessoa, ida e volta**, e podem ser alteradas depois em `radar meta` ou na seção
+  "Alertas de preço baixo" do painel. A meta em milhas considera a viagem com menos milhas na janela.
 
 ## Buscas diárias
 
@@ -170,6 +176,7 @@ radar/
   cli.py          comandos `radar ...`
   planner.py      decide quais rotas/datas consultar (janela, exploração, orçamento)
   runner.py       executa as fontes em paralelo, com novas tentativas e parada em caso de bloqueio
+  alerts.py       regras de alerta (metas, recorde, queda, datas melhores) sem repetição
   analyzer.py     monta idas e voltas, rankings, sugestões, "vale usar milhas?" e tendência
   valuation.py    milhas → reais pelo custo do milheiro
   db.py           SQLite: radares, buscas, tarifas e histórico

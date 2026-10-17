@@ -14,6 +14,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from ..airports import GROUPS, airport_name, country_flag, expand_airports
+from ..alerts import evaluate
 from ..config import Settings
 from ..db import Database
 from ..models import CABINS, FareKind, Watch, program_label
@@ -152,7 +153,8 @@ def create_app(settings: Settings | None = None, with_scheduler: bool = False) -
             h["log"] = json.loads(h["log"]) if h.get("log") else []
         return render(
             request, "watch.html", watch=watch, a=analysis, outbound=outbound, inbound=inbound,
-            history=history, running=watch.id in running,
+            history=history, running=watch.id in running, alerts=db.list_alerts(watch.id),
+            active_alerts=evaluate(analysis, settings),
         )
 
     @app.post("/watches/{watch_id}/run")
@@ -173,6 +175,16 @@ def create_app(settings: Settings | None = None, with_scheduler: bool = False) -
             background.add(task)
             task.add_done_callback(background.discard)
         return RedirectResponse(f"/watches/{watch.id}", status_code=303)
+
+    @app.post("/watches/{watch_id}/metas")
+    async def update_targets(watch_id: int, meta_dinheiro: str = Form(""), meta_milhas: str = Form("")):
+        watch = get_or_404(watch_id)
+        try:
+            cash, miles = _opt_float(meta_dinheiro), _opt_int(meta_milhas.replace(".", ""))
+        except ValueError as exc:
+            raise HTTPException(400, "Meta inválida") from exc
+        db.update_targets(watch.id, cash, miles)
+        return RedirectResponse(f"/watches/{watch.id}#alertas", status_code=303)
 
     @app.post("/watches/{watch_id}/toggle")
     async def toggle(watch_id: int):

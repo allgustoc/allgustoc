@@ -199,6 +199,8 @@ def analyze(
     analysis.best_cash = _diverse(in_window["cash"], top_n)
     analysis.best_miles = _diverse(in_window["miles"], top_n)
     analysis.best_overall = _diverse(in_window["any"], top_n)
+    if in_window["miles"]:
+        analysis.fewest_miles = min(in_window["miles"], key=lambda t: (t.total_miles, t.cost_brl))
 
     reference = in_window["any"][0].cost_brl if in_window["any"] else None
     candidates = []
@@ -227,28 +229,3 @@ def analyze(
 
 def _first_cost(trips: list[Trip]) -> float | None:
     return trips[0].cost_brl if trips else None
-
-
-def _num(value: float) -> str:
-    return f"{value:,.0f}".replace(",", ".")
-
-
-def deal_flags(analysis: Analysis, settings: Settings) -> list[str]:
-    """Motivos para disparar um alerta (modo RADAR_NOTIFY=deals)."""
-    flags: list[str] = []
-    w = analysis.watch
-    if w.target_cash_brl and analysis.best_cash and analysis.best_cash[0].cost_brl <= w.target_cash_brl:
-        flags.append(f"Dinheiro abaixo da sua meta (R$ {_num(w.target_cash_brl)})")
-    if w.target_miles and analysis.best_miles and analysis.best_miles[0].total_miles <= w.target_miles:
-        flags.append(f"Milhas abaixo da sua meta ({_num(w.target_miles)} milhas)")
-    for key, label in (("cash", "dinheiro"), ("miles", "milhas"), ("overall", "melhor opção")):
-        t = analysis.trend.get(key)
-        if not t or t["median"] is None:
-            continue
-        if t["is_record"]:
-            flags.append(f"Menor preço já visto ({label})")
-        elif t["pct"] is not None and t["pct"] <= -settings.deal_threshold:
-            flags.append(f"{label.capitalize()} {abs(t['pct']):.0%} abaixo da média recente")
-    if analysis.suggestions:
-        flags.append("Datas fora da janela bem mais baratas")
-    return flags

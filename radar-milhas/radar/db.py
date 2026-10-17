@@ -88,6 +88,16 @@ CREATE TABLE IF NOT EXISTS runs (
     log TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_runs_watch ON runs (watch_id, started_at);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    watch_id INTEGER NOT NULL REFERENCES watches(id) ON DELETE CASCADE,
+    rule TEXT NOT NULL,
+    value REAL NOT NULL,
+    message TEXT NOT NULL,
+    sent_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_alerts_watch ON alerts (watch_id, rule, sent_at);
 """
 
 
@@ -165,6 +175,13 @@ class Database:
 
     def set_watch_active(self, watch_id: int, active: bool) -> bool:
         cur = self.conn.execute("UPDATE watches SET active = ? WHERE id = ?", (int(active), watch_id))
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def update_targets(self, watch_id: int, cash_brl: float | None, miles: int | None) -> bool:
+        cur = self.conn.execute(
+            "UPDATE watches SET target_cash_brl = ?, target_miles = ? WHERE id = ?", (cash_brl, miles, watch_id)
+        )
         self.conn.commit()
         return cur.rowcount > 0
 
@@ -306,5 +323,28 @@ class Database:
         rows = self.conn.execute(
             "SELECT * FROM runs WHERE watch_id = ? AND finished_at IS NOT NULL ORDER BY id DESC LIMIT ?",
             (watch_id, limit),
+        )
+        return [dict(r) for r in rows]
+
+    # ---------------------------------------------------------------- alertas
+    def record_alert(self, watch_id: int, rule: str, value: float, message: str, sent_at: datetime | None = None) -> None:
+        self.conn.execute(
+            "INSERT INTO alerts (watch_id, rule, value, message, sent_at) VALUES (?, ?, ?, ?, ?)",
+            (watch_id, rule, value, message, _iso(sent_at or _now())),
+        )
+        self.conn.commit()
+
+    def last_alerts(self, watch_id: int) -> dict[str, tuple[float, datetime]]:
+        """Último alerta enviado de cada regra: {regra: (valor, quando)}."""
+        rows = self.conn.execute(
+            """SELECT a.rule, a.value, a.sent_at FROM alerts a
+               JOIN (SELECT rule, MAX(id) AS id FROM alerts WHERE watch_id = ? GROUP BY rule) m ON m.id = a.id""",
+            (watch_id,),
+        )
+        return {r["rule"]: (r["value"], datetime.fromisoformat(r["sent_at"])) for r in rows}
+
+    def list_alerts(self, watch_id: int, limit: int = 20) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM alerts WHERE watch_id = ? ORDER BY id DESC LIMIT ?", (watch_id, limit)
         )
         return [dict(r) for r in rows]

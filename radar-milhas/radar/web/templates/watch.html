@@ -85,6 +85,25 @@
 </div>
 {% endif %}
 
+<h2 id="alertas">🔔 Alertas de preço baixo</h2>
+<div class="card">
+  <p class="small muted" style="margin-top:0">Você recebe um aviso (Telegram/e-mail) quando a ida e volta por pessoa ficar abaixo da meta,
+  quando aparecer o menor preço já visto, quando o preço cair {{ "%.0f" | format(settings.deal_threshold * 100) }}% abaixo da média
+  ou quando surgir uma data fora da janela bem mais barata. O mesmo alerta só se repete se o preço cair mais 3% ou após 7 dias.</p>
+  <form method="post" action="/watches/{{ watch.id }}/metas" class="form-grid">
+    <div><label>Meta em R$ por pessoa</label><input name="meta_dinheiro" inputmode="decimal" placeholder="4500" value="{{ '%.0f' | format(watch.target_cash_brl) if watch.target_cash_brl else '' }}"></div>
+    <div><label>Meta em milhas por pessoa</label><input name="meta_milhas" inputmode="numeric" placeholder="140000" value="{{ watch.target_miles or '' }}"></div>
+    <div style="align-self:end"><button type="submit">Salvar metas</button></div>
+  </form>
+  {% if active_alerts %}<p>⚡ Agora: {% for al in active_alerts %}<span class="pill good">{{ al.title }}</span> {% endfor %}</p>{% endif %}
+  {% if alerts %}
+  <div class="table-wrap" style="margin-top:12px"><table>
+    <tr><th>Enviado em</th><th>Alerta</th></tr>
+    {% for al in alerts %}<tr><td class="small">{{ al.sent_at[:16].replace("T", " ") }}</td><td>{{ al.message }}</td></tr>{% endfor %}
+  </table></div>
+  {% else %}<p class="small muted">Nenhum alerta enviado ainda.</p>{% endif %}
+</div>
+
 {% if a.suggestions %}
 <h2>📅 Sugestões fora do seu radar</h2>
 <p class="muted small">Datas até {{ watch.explore_days }} dias antes/depois da sua janela que estão pelo menos {{ "%.0f" | format(settings.suggestion_min_saving * 100) }}% mais baratas que a melhor opção dentro dela.</p>

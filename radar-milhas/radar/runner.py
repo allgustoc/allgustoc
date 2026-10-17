@@ -234,5 +234,5 @@ async def run_all(
             except Exception:  # pragma: no cover - limpeza
                 log.debug("Erro ao fechar %s", p.key, exc_info=True)
     if notify:
-        await notify_results(results, settings)
+        await notify_results(results, settings, db)
     return results

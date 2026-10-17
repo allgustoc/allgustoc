@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import html
+import re
 import logging
 import smtplib
+from datetime import datetime
 from email.message import EmailMessage
 
 import httpx
 
 from .airports import country_flag
-from .analyzer import deal_flags
+from .alerts import Alert, evaluate, only_new
 from .config import Settings
 from .models import Analysis, FareKind, Leg, Trip, program_label
 
@@ -112,9 +114,9 @@ def format_digest(analysis: Analysis, settings: Settings) -> str:
         lines.append("\n<b>📅 Datas fora do seu radar com bom preço</b>")
         for trip in analysis.suggestions[:3]:
             lines.extend(trip_text(trip, w.adults))
-    flags = deal_flags(analysis, settings)
-    if flags:
-        lines.append("\n⚡ " + " · ".join(flags))
+    current = evaluate(analysis, settings)
+    if current:
+        lines.append("\n⚡ " + " · ".join(a.title for a in current))
     if any(t.taxes_estimated for t in analysis.best_miles + analysis.best_overall):
         lines.append("<i>~ taxas estimadas; confirme no site antes de emitir.</i>")
     lines.append("<i>Valores em R$ convertem milhas pelo seu custo do milheiro (RADAR_MILHEIRO).</i>")
@@ -152,9 +154,7 @@ async def send_telegram(text: str, settings: Settings, client: httpx.AsyncClient
 
 
 def _strip_html(text: str) -> str:
-    for tag in ("<b>", "</b>", "<i>", "</i>"):
-        text = text.replace(tag, "")
-    return html.unescape(text)
+    return html.unescape(re.sub(r"<[^>]+>", "", text))
 
 
 def send_email(subject: str, text: str, settings: Settings) -> None:
@@ -175,25 +175,52 @@ def send_email(subject: str, text: str, settings: Settings) -> None:
         server.send_message(msg)
 
 
-async def notify_results(results, settings: Settings) -> None:
+def format_alerts(analysis: Analysis, alerts: list[Alert]) -> str:
+    w = analysis.watch
+    lines = [f"🚨 <b>Alerta de preço: {html.escape(w.name)}</b>"]
+    for alert in alerts:
+        lines.append(f"\n<b>{alert.title}</b>: {html.escape(alert.detail)}")
+        lines.extend(trip_text(alert.trip, w.adults))
+    links = [l.quote.booking_url for l in alerts[0].trip.legs if l.quote.booking_url]
+    if links:
+        lines.append(f'\n<a href="{html.escape(links[0])}">Abrir no site</a> · confirme antes de emitir')
+    return "\n".join(lines)
+
+
+async def _deliver(subject: str, text: str, settings: Settings) -> None:
+    print(_strip_html(text) + "\n")
+    if settings.telegram_token and settings.telegram_chat_id:
+        try:
+            await send_telegram(text, settings)
+        except httpx.HTTPError as exc:
+            log.error("Falha ao enviar Telegram: %s", exc)
+    if settings.smtp_host and settings.email_to:
+        try:
+            await asyncio.to_thread(send_email, subject, text, settings)
+        except (OSError, smtplib.SMTPException) as exc:
+            log.error("Falha ao enviar e-mail: %s", exc)
+
+
+async def notify_results(results, settings: Settings, db=None) -> None:
+    """Envia primeiro os alertas novos (sem repetir os já avisados) e, no modo digest, o resumo do dia."""
+    now = datetime.now()
     for result in results:
         analysis = result.analysis
-        if settings.notify_mode == "deals" and not deal_flags(analysis, settings):
-            log.info("Radar #%s: sem oportunidade nova, nenhuma notificação", analysis.watch.id)
+        watch = analysis.watch
+        alerts = evaluate(analysis, settings)
+        if db is not None:
+            alerts = only_new(alerts, db.last_alerts(watch.id), now)
+        if alerts:
+            await _deliver(f"🚨 Alerta de preço: {watch.name}", format_alerts(analysis, alerts), settings)
+            if db is not None:
+                for alert in alerts:
+                    db.record_alert(watch.id, alert.rule, alert.value, f"{alert.title}: {alert.detail}", now)
+        if settings.notify_mode == "deals":
+            if not alerts:
+                log.info("Radar #%s: nenhum alerta novo", watch.id)
             continue
         text = format_digest(analysis, settings)
-        if result.n_errors:
-            stopped = [s for s in result.stats if s.stopped]
-            if stopped:
-                text += "\n⚠️ Fontes com problema: " + ", ".join(html.escape(f"{s.provider} ({s.stopped})") for s in stopped)
-        print(_strip_html(text) + "\n")
-        if settings.telegram_token and settings.telegram_chat_id:
-            try:
-                await send_telegram(text, settings)
-            except httpx.HTTPError as exc:
-                log.error("Falha ao enviar Telegram: %s", exc)
-        if settings.smtp_host and settings.email_to:
-            try:
-                await asyncio.to_thread(send_email, f"Radar de passagens: {analysis.watch.name}", text, settings)
-            except (OSError, smtplib.SMTPException) as exc:
-                log.error("Falha ao enviar e-mail: %s", exc)
+        stopped = [s for s in result.stats if s.stopped]
+        if stopped:
+            text += "\n⚠️ Fontes com problema: " + ", ".join(html.escape(f"{s.provider} ({s.stopped})") for s in stopped)
+        await _deliver(f"Radar de passagens: {watch.name}", text, settings)
