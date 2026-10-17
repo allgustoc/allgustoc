@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Seus radares</h1>
+<p class="muted small">O bot busca todo dia às {{ settings.run_at }} ({{ settings.timezone }}) nas fontes: <b>{{ settings.providers | join(", ") }}</b>.</p>
+
+{% if watches %}
+<div class="table-wrap"><table>
+  <tr><th>Radar</th><th>Rotas</th><th>Janela</th><th>Melhor dinheiro</th><th>Melhor milhas</th><th>Última busca</th></tr>
+  {% for item in watches %}{% set w = item.watch %}{% set last = item.last %}
+  <tr>
+    <td><a href="/watches/{{ w.id }}">{{ w.name }}</a>
+      {% if not w.active %}<span class="pill">pausado</span>{% endif %}
+      {% if item.running %}<span class="pill good">buscando…</span>{% endif %}</td>
+    <td>{{ w.origins | join(",") }} → {{ w.destinations | join(",") }}</td>
+    <td>{{ w.start_date | dmy }} a {{ w.end_date | dmy }}<br><span class="muted small">{% if w.round_trip %}{{ w.min_nights }}–{{ w.max_nights }} noites{% else %}só ida{% endif %}</span></td>
+    <td>{{ (last.best_cash_brl * w.adults) | brl if last and last.best_cash_brl else "—" }}</td>
+    <td>{{ (last.best_miles_brl * w.adults) | brl if last and last.best_miles_brl else "—" }}<br><span class="muted small">equivalente em R$</span></td>
+    <td class="small">{{ last.finished_at[:16].replace("T", " ") if last else "nunca" }}</td>
+  </tr>
+  {% endfor %}
+</table></div>
+{% else %}
+<div class="card">Nenhum radar ainda. Cadastre o primeiro abaixo.</div>
+{% endif %}
+
+<h2>Novo radar</h2>
+{% if error %}<div class="error">{{ error }}</div>{% endif %}
+{% set f = form or {} %}
+<form class="card" method="post" action="/watches">
+  <div class="form-grid">
+    <div><label>Nome</label><input name="nome" placeholder="Férias em Portugal" value="{{ f.nome or '' }}"></div>
+    <div><label>Origem (IATA)</label><input name="origem" required placeholder="GRU,VCP" value="{{ f.origem or 'GRU' }}"></div>
+    <div><label>Destino (IATA ou PT, ES, PTES)</label><input name="destino" required placeholder="PT,ES" value="{{ f.destino or 'PTES' }}"></div>
+    <div><label>Data de início</label><input type="date" name="inicio" required value="{{ f.inicio or '' }}"></div>
+    <div><label>Data de fim</label><input type="date" name="fim" required value="{{ f.fim or '' }}"></div>
+    <div><label>Tipo</label><select name="tipo">
+      <option value="ida_volta">Ida e volta</option>
+      <option value="so_ida" {% if f.tipo == 'so_ida' %}selected{% endif %}>Somente ida</option></select></div>
+    <div><label>Noites (mín.)</label><input type="number" name="noites_min" min="1" value="{{ f.noites_min or 7 }}"></div>
+    <div><label>Noites (máx.)</label><input type="number" name="noites_max" min="1" value="{{ f.noites_max or 21 }}"></div>
+    <div><label>Adultos</label><input type="number" name="adultos" min="1" max="9" value="{{ f.adultos or 1 }}"></div>
+    <div><label>Cabine</label><select name="cabine">{% for c in CABINS %}<option value="{{ c }}" {% if f.cabine == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div><label>Máx. paradas (opcional)</label><input type="number" name="max_paradas" min="0" value="{{ f.max_paradas or '' }}"></div>
+    <div><label>Meta em R$ por pessoa (opcional)</label><input name="meta_dinheiro" inputmode="decimal" placeholder="4500" value="{{ f.meta_dinheiro or '' }}"></div>
+    <div><label>Meta em milhas por pessoa (opcional)</label><input name="meta_milhas" inputmode="numeric" placeholder="140000" value="{{ f.meta_milhas or '' }}"></div>
+    <div><label>Explorar datas ± dias</label><input type="number" name="explorar" min="0" max="120" value="{{ f.explorar or 30 }}"></div>
+  </div>
+  <p class="muted small">Atalhos de destino: {% for k, v in GROUPS.items() %}<b>{{ k }}</b> = {{ v | join(",") }}{% if not loop.last %} · {% endif %}{% endfor %}</p>
+  <button type="submit">Criar radar</button>
+</form>
+
+{% if health %}
+<h2>Saúde das fontes (7 dias)</h2>
+<div class="table-wrap"><table>
+  <tr><th>Fonte</th><th>Status</th><th>Buscas</th><th>Última</th></tr>
+  {% for h in health %}
+  <tr><td>{{ h.provider }}</td>
+      <td><span class="pill {{ 'good' if h.status in ('ok','empty') else 'bad' }}">{{ h.status }}</span></td>
+      <td>{{ h.n }}</td><td class="small">{{ h.last[:16].replace("T", " ") }}</td></tr>
+  {% endfor %}
+</table></div>
+{% endif %}
+{% endblock %}

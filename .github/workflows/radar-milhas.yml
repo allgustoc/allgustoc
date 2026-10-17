@@ -1,0 +1,22 @@
+name: radar-milhas
+
+on:
+  push:
+    paths: ["radar-milhas/**", ".github/workflows/radar-milhas.yml"]
+  pull_request:
+    paths: ["radar-milhas/**", ".github/workflows/radar-milhas.yml"]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: radar-milhas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev,browser]"
+      - run: python -m playwright install --with-deps chromium
+      - run: pytest -q
