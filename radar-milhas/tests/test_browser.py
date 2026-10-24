@@ -58,6 +58,7 @@ def server():
 def _session(settings, tmp_path):
     settings.browser_profile_dir = str(tmp_path / "profile")
     settings.browser_timeout = 15
+    settings.browser_headless = True
     settings.browser_executable = os.environ.get("RADAR_BROWSER_EXECUTABLE", "")
     return BrowserSession(settings, "teste")
 
@@ -95,3 +96,19 @@ def test_block_page_raises(server, settings, tmp_path):
             if "Executable doesn't exist" in str(exc):
                 pytest.skip("Chromium do Playwright não instalado")
             raise
+
+
+def test_missing_chromium_gives_install_hint(settings, tmp_path):
+    from radar.providers.base import ProviderError
+
+    session = _session(settings, tmp_path)
+    settings.browser_executable = str(tmp_path / "nao-existe" / "chrome")
+
+    async def go():
+        try:
+            await session._ensure()
+        finally:
+            await session.close()
+
+    with pytest.raises(ProviderError, match="playwright install chromium"):
+        asyncio.run(go())

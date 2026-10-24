@@ -90,7 +90,7 @@ class LatamProvider(Provider):
 
     async def search(self, origin, destination, day, adults, cabin):
         quotes: list[FareQuote] = []
-        errors: list[str] = []
+        errors: list[ProviderError] = []
         for redemption in self.modes:
             url = search_url(origin, destination, day, adults, cabin, redemption)
             try:
@@ -98,19 +98,21 @@ class LatamProvider(Provider):
             except ProviderBlocked:
                 raise
             except ProviderError as exc:
-                errors.append(str(exc))
+                errors.append(exc)
                 continue
             payload = captured[-1].body
             self.dump(f"{origin}{destination}{day}-{'pts' if redemption else 'brl'}", payload)
             if not isinstance(payload, dict) or "content" not in payload:
-                errors.append("LATAM: formato de resposta inesperado (veja RADAR_DEBUG_DUMP_DIR)")
+                errors.append(ProviderError("formato de resposta inesperado do site (rode radar diagnostico)", transient=False))
                 continue
             parsed = parse_latam(payload, day, cabin, redemption, self.settings.tax_estimate_brl, url)
             for q in parsed:
                 q.origin, q.destination = q.origin or origin, q.destination or destination
             quotes.extend(q for q in parsed if q.origin == origin and q.destination == destination)
         if errors and len(errors) == len(self.modes):
-            raise ProviderError("; ".join(errors))
+            # Só vale tentar de novo se todas as falhas forem passageiras.
+            transient = all(e.transient for e in errors)
+            raise ProviderError("; ".join(dict.fromkeys(str(e) for e in errors)), transient=transient)
         return quotes
 
     async def close(self):

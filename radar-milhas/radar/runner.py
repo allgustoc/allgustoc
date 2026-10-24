@@ -14,17 +14,21 @@ from .config import Settings
 from .db import Database
 from .models import Analysis, FareQuote, SearchTask, Watch
 from .planner import build_tasks, prioritize
-from .providers import Provider, ProviderBlocked, ProviderError, create_providers
+from .providers import PROVIDER_LABELS, Provider, ProviderBlocked, ProviderError, create_providers
 
 log = logging.getLogger(__name__)
 
 MAX_CONSECUTIVE_ERRORS = 5
 RETRIES = 2
 
+# Buscas em andamento, por radar: lido pelo painel para mostrar o progresso.
+PROGRESS: dict[int, dict] = {}
+
 
 @dataclass
 class ProviderStats:
     provider: str
+    label: str = ""
     planned: int = 0
     searches: int = 0
     quotes: int = 0
@@ -80,9 +84,17 @@ def _chunks(dates: list[date], max_days: int) -> list[tuple[date, date]]:
 
 
 async def _run_provider(
-    provider: Provider, tasks: list[SearchTask], watch: Watch, db: Database, settings: Settings, now: datetime
+    provider: Provider,
+    tasks: list[SearchTask],
+    watch: Watch,
+    db: Database,
+    settings: Settings,
+    now: datetime,
+    progress: dict | None = None,
 ) -> ProviderStats:
-    stats = ProviderStats(provider.key)
+    stats = ProviderStats(provider.key, provider.label)
+    progress = progress if progress is not None else {}
+    progress.update(label=provider.label, done=0, total=0, status="running", message="")
     last = db.last_searched(provider.key, watch.adults, watch.cabin)
     budget = settings.max_searches_per_provider
     consecutive_errors = 0
@@ -97,7 +109,9 @@ async def _run_provider(
             by_route[(t.origin, t.destination)].append(t.date)
         calls = [(o, d, s, e) for (o, d), dates in by_route.items() for s, e in _chunks(dates, provider.max_range_days)]
         stats.planned = len(calls)
+        progress["total"] = min(len(calls), budget)
         for origin, destination, start, end in calls[:budget]:
+            progress["message"] = f"{origin}→{destination} {start:%d/%m}–{end:%d/%m}"
             try:
                 quotes = await _with_retries(
                     lambda: provider.search_range(origin, destination, start, end, watch.adults, watch.cabin), settings
@@ -108,6 +122,7 @@ async def _run_provider(
                 if isinstance(exc, ProviderBlocked) or not exc.transient:
                     stats.stopped = str(exc)
                     break
+                progress["done"] += 1
                 continue
             per_day: dict[date, list[FareQuote]] = defaultdict(list)
             for q in quotes:
@@ -120,12 +135,16 @@ async def _run_provider(
                 stats.searches += 1
                 stats.quotes += len(found)
                 day += timedelta(days=1)
+            progress["done"] += 1
             await _pause(settings, provider)
+        progress["status"] = "stopped" if stats.stopped else "done"
         return stats
 
     due = prioritize(tasks, last, now, budget, settings.refresh_hours)
     stats.planned = len(due)
+    progress["total"] = len(due)
     for t in due:
+        progress["message"] = f"{t.origin}→{t.destination} {t.date:%d/%m}"
         try:
             quotes = await _with_retries(
                 lambda: provider.search(t.origin, t.destination, t.date, watch.adults, watch.cabin), settings
@@ -143,13 +162,16 @@ async def _run_provider(
             if not exc.transient or consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
                 stats.stopped = str(exc)
                 break
+            progress["done"] += 1
             await _pause(settings, provider)
             continue
         consecutive_errors = 0
+        progress["done"] += 1
         record(t.origin, t.destination, t.date, "ok" if quotes else "empty", quotes)
         stats.searches += 1
         stats.quotes += len(quotes)
         await _pause(settings, provider)
+    progress["status"] = "stopped" if stats.stopped else "done"
     return stats
 
 
@@ -170,19 +192,27 @@ async def run_watch(
     providers: list[Provider],
     today: date | None = None,
     now: datetime | None = None,
+    setup_errors: list[ProviderStats] | None = None,
 ) -> RunResult:
     now = now or datetime.now()
     today = today or now.date()
     run_id = db.start_run(watch.id)
     tasks = build_tasks(watch, today, settings.explore_step_days)
-    results = await asyncio.gather(
-        *(_run_provider(p, tasks, watch, db, settings, now) for p in providers), return_exceptions=True
-    )
-    stats: list[ProviderStats] = []
-    for provider, res in zip(providers, results):
+    state = PROGRESS.setdefault(watch.id, {"started_at": now.isoformat(timespec="seconds"), "providers": {}})
+    try:
+        results = await asyncio.gather(
+            *(_run_provider(p, tasks, watch, db, settings, now, state["providers"].setdefault(p.key, {}))
+              for p in providers),
+            return_exceptions=True,
+        )
+    finally:
+        PROGRESS.pop(watch.id, None)
+    stats: list[ProviderStats] = list(setup_errors or [])
+    for provider, res in zip(providers, results, strict=True):
         if isinstance(res, BaseException):
             log.exception("Falha inesperada na fonte %s", provider.key, exc_info=res)
-            res = ProviderStats(provider.key, errors=1, stopped=f"erro inesperado: {res}")
+            first_line = (str(res).strip().splitlines() or [type(res).__name__])[0][:200]
+            res = ProviderStats(provider.key, provider.label, errors=1, stopped=f"erro inesperado: {first_line}")
         stats.append(res)
         if res.stopped:
             log.warning("[%s] fonte interrompida: %s", provider.key, res.stopped)
@@ -214,20 +244,24 @@ async def run_all(
     if not watches:
         log.info("Nenhum radar ativo")
         return []
-    providers = create_providers(settings)
+    for watch in watches:
+        PROGRESS.setdefault(watch.id, {"started_at": datetime.now().isoformat(timespec="seconds"), "providers": {}})
+    providers, failures = create_providers(settings)
+    setup_errors = [ProviderStats(key, PROVIDER_LABELS.get(key, key), errors=1, stopped=msg) for key, msg in failures]
     if not providers:
         log.error("Nenhuma fonte disponível. Confira RADAR_PROVIDERS e as chaves de API.")
-        return []
     results = []
     try:
         for watch in watches:
             log.info("Rodando radar #%s (%s)", watch.id, watch.name)
-            result = await run_watch(watch, db, settings, providers)
+            result = await run_watch(watch, db, settings, providers, setup_errors=setup_errors)
             log.info(
                 "Radar #%s: %d buscas, %d tarifas, %d erros", watch.id, result.n_searches, result.n_quotes, result.n_errors
             )
             results.append(result)
     finally:
+        for watch in watches:
+            PROGRESS.pop(watch.id, None)
         for p in providers:
             try:
                 await p.close()

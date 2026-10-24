@@ -59,8 +59,29 @@ class BrowserSession:
             kwargs["executable_path"] = self.settings.browser_executable
         profile_dir = Path(self.settings.browser_profile_dir) / self.profile
         profile_dir.mkdir(parents=True, exist_ok=True)
-        self._ctx = await self._pw.chromium.launch_persistent_context(str(profile_dir), **kwargs)
+        try:
+            self._ctx = await self._launch(profile_dir, kwargs)
+        except ProviderError:
+            await self.close()
+            raise
         return self._ctx
+
+    async def _launch(self, profile_dir: Path, kwargs: dict):
+        try:
+            return await self._pw.chromium.launch_persistent_context(str(profile_dir), **kwargs)
+        except Exception as exc:
+            text = str(exc)
+            if "executable doesn't exist" in text.lower() or "playwright install" in text:
+                raise ProviderError(
+                    "o Chromium do navegador automatizado não está instalado. Rode: python -m playwright install chromium",
+                    transient=False,
+                ) from exc
+            if not kwargs["headless"] and ("DISPLAY" in text or "X server" in text):
+                # Servidor sem tela (Docker, VPS): cai para o modo invisível.
+                log.warning("Sem tela disponível; abrindo o navegador em modo invisível")
+                return await self._launch(profile_dir, {**kwargs, "headless": True})
+            first_line = text.strip().splitlines()[0] if text.strip() else type(exc).__name__
+            raise ProviderError(f"não foi possível abrir o navegador: {first_line[:200]}", transient=False) from exc
 
     async def capture(self, url: str, matcher: Callable[[str], bool], timeout: float | None = None) -> list[Captured]:
         """Abre `url` e devolve as respostas JSON cujas URLs satisfazem `matcher`."""

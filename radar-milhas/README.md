@@ -27,65 +27,79 @@ combinação e sugere **datas fora da sua janela** que estejam bem mais baratas.
   milhas por radar e receba um aviso 🚨 quando ela for atingida, quando aparecer o menor preço já visto,
   quando o preço cair 10% abaixo da média ou quando surgir uma data fora da janela bem mais barata. O
   mesmo alerta não se repete todo dia: só volta se o preço cair mais 3% ou depois de 7 dias.
-- **Avisos** por Telegram e/ou e-mail: alertas sempre, mais um resumo diário (`RADAR_NOTIFY=digest`) ou
+- **Avisos** por WhatsApp, Telegram e/ou e-mail: alertas sempre, mais um resumo diário (`RADAR_NOTIFY=digest`) ou
   só os alertas (`RADAR_NOTIFY=deals`).
 - **Painel web** para cadastrar radares e ver ranking, sugestões, calendário de preços e histórico.
 
-## Começo rápido (modo demonstração)
+## Instalação
 
-```bash
-cd radar-milhas
-python -m venv .venv && source .venv/bin/activate
+Precisa de **Python 3.11 ou mais novo** e **Git**. Todos os preços vêm dos sites das companhias: não há
+dados inventados.
+
+### Windows (Prompt de Comando)
+
+1. Instale o Python: `winget install -e --id Python.Python.3.12` (ou baixe em python.org e marque
+   **"Add python.exe to PATH"**). Feche e abra o terminal de novo.
+2. Rode, um comando por vez:
+
+```
+git clone -b claude/airline-ticket-search-bot-ykiq0k https://github.com/allgustoc/allgustoc.git
+cd allgustoc\radar-milhas
+python -m venv .venv
+.venv\Scripts\activate.bat
 pip install -e ".[dev]"
-cp .env.example .env            # começa com RADAR_PROVIDERS=demo
-
-radar add --nome "Férias Europa" --origem GRU,VCP --destino PTES \
-          --inicio 2026-12-10 --fim 2027-01-20 --noites 10-18 --meta-dinheiro 5000
-radar run                        # busca agora e imprime o resumo
-radar web                        # painel em http://127.0.0.1:8000
+python -m playwright install chromium
+copy .env.example .env
+radar diagnostico --origem CNF --destino LIS --data 2027-05-28
+radar web --agendar
 ```
 
-A fonte `demo` gera preços sintéticos e plausíveis para você ver o bot inteiro funcionando antes de
-configurar as fontes reais.
+Abra **http://localhost:8000**. Nas próximas vezes basta `cd allgustoc\radar-milhas`,
+`.venv\Scripts\activate.bat` e `radar web --agendar`. (No PowerShell, ative com `.venv\Scripts\Activate.ps1`.)
+
+### Mac / Linux
+
+```bash
+git clone -b claude/airline-ticket-search-bot-ykiq0k https://github.com/allgustoc/allgustoc.git
+cd allgustoc/radar-milhas
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]" && python -m playwright install chromium
+cp .env.example .env
+radar diagnostico --origem GRU --destino LIS
+radar web --agendar
+```
 
 ## Fontes de dados
 
-As companhias **não oferecem API pública** para os programas de fidelidade. Por isso o bot combina
-fontes estáveis por API com a leitura automatizada dos próprios sites:
+As companhias **não oferecem API pública** para os programas de fidelidade. Por padrão o bot abre os
+próprios sites num navegador (Chromium) e lê as tarifas que o site recebe, como uma pessoa faria:
 
-| Fonte (`RADAR_PROVIDERS`) | Traz | Como funciona | Estabilidade |
+| Fonte (`RADAR_PROVIDERS`) | Traz | Como funciona | Custo |
 |---|---|---|---|
-| `serpapi` | 💵 Dinheiro (TAP, LATAM, Azul, Iberia, Air Europa…) | API do Google Flights via [SerpApi](https://serpapi.com/google-flights-api), `SERPAPI_KEY` | Alta (API paga, com plano gratuito) |
-| `seats_aero` | 🎯 Milhas (Smiles, Azul e outros programas) | [seats.aero](https://seats.aero) Partner API, `SEATS_AERO_KEY` (plano Pro). Varre várias datas por chamada | Alta |
-| `smiles` | 🎯 Milhas Smiles | Abre a busca do site num Chromium e lê o JSON que o próprio site recebe. Consulta a taxa de embarque dos voos mais baratos | Média: o site muda e tem antirrobô |
-| `latam` | 💵 Dinheiro + 🎯 LATAM Pass | Igual ao anterior, nas buscas em reais e em pontos | Média |
-| `azul` | 💵 Dinheiro + 🎯 Azul Fidelidade | Igual ao anterior (experimental) | Baixa/média |
-| `demo` | Ambos | Dados sintéticos | Só para testes |
+| `latam` | Dinheiro + LATAM Pass | Site da LATAM, buscas em reais e em pontos | Grátis |
+| `smiles` | Milhas Smiles (GOL e parceiras) | Site da Smiles; consulta a taxa de embarque dos voos mais baratos | Grátis |
+| `azul` | Dinheiro + Azul Fidelidade | Site da Azul (experimental) | Grátis |
+| `serpapi` | Dinheiro (TAP, Iberia, Air Europa, todas) | API do Google Flights via [SerpApi](https://serpapi.com/google-flights-api), `SERPAPI_KEY` | Plano gratuito limitado |
+| `seats_aero` | Milhas (Smiles, Azul e outros) | [seats.aero](https://seats.aero) Partner API, `SEATS_AERO_KEY` | Plano Pro |
 
-Configuração recomendada: `RADAR_PROVIDERS=serpapi,seats_aero,latam,smiles`.
+Padrão: `RADAR_PROVIDERS=latam,smiles,azul`. Para incluir TAP e Iberia em dinheiro, acrescente `serpapi`.
 
-Para as fontes de site, instale o navegador:
+O navegador abre numa janela visível (`RADAR_BROWSER_HEADLESS=false`), porque os sites bloqueiam
+navegadores invisíveis com mais frequência. Se aparecer uma verificação antirrobô, resolva uma vez na
+janela: os cookies ficam salvos em `data/browser/`.
 
-```bash
-pip install -e ".[browser]"
-playwright install chromium
-```
+### Diagnóstico
 
-### Valide os conectores de site antes de confiar neles
-
-Os formatos internos dos sites mudam sem aviso, então os conectores `smiles`, `latam` e `azul` foram
-escritos para **avisar quando algo muda**, sem falhar em silêncio. Teste cada um na sua máquina:
+Os sites mudam sem aviso. Para conferir se cada fonte está funcionando:
 
 ```bash
-radar probe smiles GRU LIS 2027-03-10
-radar probe latam  GRU LIS 2027-03-10
-radar probe azul   VCP LIS 2027-03-10
+radar diagnostico --origem CNF --destino LIS --data 2027-05-28
 ```
 
-O comando mostra as tarifas lidas e salva as respostas brutas em `data/debug/`. Se o site mudou o
-formato, é ali que se ajusta o parser (`radar/providers/<fonte>.py`). Se o site pedir captcha, use
-`RADAR_BROWSER_HEADLESS=false`, resolva uma vez na janela que abrir e o perfil persistente
-(`data/browser/`) guarda os cookies.
+Ele abre cada site, mostra as tarifas lidas (ou o motivo da falha e o que fazer) e salva as respostas
+brutas em `data/debug/`. Se uma fonte vier vazia ou com erro, esses arquivos permitem ajustar o conector
+(`radar/providers/<fonte>.py`). No painel, a página do radar mostra o progresso de cada fonte durante a
+busca e explica qualquer falha.
 
 ## Cadastro de radares
 
@@ -136,6 +150,11 @@ bot não recomenda o que esgotou.
 
 ## Notificações
 
+**WhatsApp:** o bot usa o [CallMeBot](https://www.callmebot.com/blog/free-api-whatsapp-messages/),
+gratuito, que manda mensagens para o seu próprio número. Adicione o número do CallMeBot aos contatos,
+envie a ele a mensagem de ativação indicada no site e copie a apikey recebida. No `.env`:
+`WHATSAPP_PHONE=+5531999999999` e `WHATSAPP_APIKEY=<sua apikey>`.
+
 **Telegram:** crie um bot com o [@BotFather](https://t.me/BotFather) e copie o token para
 `TELEGRAM_BOT_TOKEN`. Mande uma mensagem ao seu bot e abra
 `https://api.telegram.org/bot<TOKEN>/getUpdates` para descobrir o `chat.id`, que vai em
@@ -182,8 +201,8 @@ radar/
   db.py           SQLite: radares, buscas, tarifas e histórico
   notifier.py     resumo para Telegram, e-mail e console
   scheduler.py    agenda diária
-  web/            painel (FastAPI + Jinja)
-  providers/      demo, serpapi, seats_aero, smiles, latam, azul (+ browser.py)
+  web/            painel (FastAPI + Jinja + CSS próprio; decisões de design em DESIGN.md)
+  providers/      latam, smiles, azul (+ browser.py), serpapi, seats_aero; demo só para testes
 ```
 
 Para adicionar uma fonte, implemente `Provider.search()` (ou `search_range()` para fontes que respondem
@@ -193,12 +212,12 @@ várias datas por chamada), devolvendo `FareQuote` só de ida por passageiro, e 
 ## Testes
 
 ```bash
-pip install -e ".[dev,browser]"
+pip install -e ".[dev]"
 pytest
 ```
 
 Os testes cobrem planejamento, análise (combinações, sugestões, metas e tendência), parsers de cada
-fonte, a execução completa com a fonte demo, o painel web e a captura via navegador contra um site
+fonte, a execução completa (com dados sintéticos, só nos testes), o painel web e a captura via navegador contra um site
 local.
 
 ## Cuidados

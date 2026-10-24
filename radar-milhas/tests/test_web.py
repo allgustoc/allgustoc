@@ -31,4 +31,25 @@ def test_update_targets(settings):
         db = client.app.state.db
         w = db.get_watch(int(url.rsplit("/", 1)[1]))
         assert (w.target_cash_brl, w.target_miles) == (3900.0, 120000)
-        assert "Alertas de preço baixo" in client.get(url).text
+        assert "Alertas de preço" in client.get(url).text
+
+
+def test_failed_source_is_explained_on_page(settings):
+    import asyncio
+
+    from radar.db import Database
+    from radar.runner import run_all
+
+    settings.providers = ["fonte_que_nao_existe"]
+    with TestClient(create_app(settings)) as client:
+        resp = client.post("/watches", data={"origem": "GRU", "destino": "LIS", "inicio": "2027-03-01",
+                                             "fim": "2027-03-25"}, follow_redirects=False)
+        url = resp.headers["location"]
+        assert "ainda não buscou" in client.get(url).text
+        db = Database(settings.db_path)
+        asyncio.run(run_all(db, settings, notify=False))
+        db.close()
+        page = client.get(url).text
+        assert "a busca falhou" in page and "Fonte desconhecida" in page
+        status = client.get(f"{url}/status").json()
+        assert status == {"running": False, "providers": {}}

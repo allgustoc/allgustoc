@@ -4,50 +4,19 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}Radar de Milhas{% endblock %}</title>
-<style>
-:root {
-  --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #6b7385; --line: #e3e6ec;
-  --accent: #0b6bcb; --good: #1a7f4b; --good-bg: #e5f5ec; --mid-bg: #fff6dc; --bad: #b42318; --bad-bg: #fdecea;
-}
-@media (prefers-color-scheme: dark) {
-  :root { --bg: #11151c; --card: #1a1f29; --text: #e6e9ef; --muted: #98a1b3; --line: #2b3240;
-    --accent: #5aa9ff; --good: #5fd39a; --good-bg: #173326; --mid-bg: #33301a; --bad: #ff8a80; --bad-bg: #3a1d1b; }
-}
-* { box-sizing: border-box; }
-body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
-header { background: var(--card); border-bottom: 1px solid var(--line); }
-header .wrap { display: flex; align-items: center; gap: 12px; }
-header a { color: inherit; text-decoration: none; font-weight: 700; font-size: 18px; }
-.wrap { max-width: 1100px; margin: 0 auto; padding: 14px 16px; }
-h1 { font-size: 22px; margin: 8px 0 4px; } h2 { font-size: 17px; margin: 28px 0 10px; }
-.muted { color: var(--muted); } .small { font-size: 13px; }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
-.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
-.stat .value { font-size: 24px; font-weight: 700; } .stat .label { color: var(--muted); font-size: 13px; }
-table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
-th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
-th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
-tr:last-child td { border-bottom: 0; }
-.table-wrap { overflow-x: auto; }
-form.inline { display: inline; }
-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
-input, select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: inherit; }
-.form-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
-button, .btn { display: inline-block; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; font: inherit; cursor: pointer; text-decoration: none; }
-button.ghost { background: transparent; color: var(--accent); }
-button.danger { background: transparent; border-color: var(--bad); color: var(--bad); }
-.pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px; background: var(--line); }
-.pill.good { background: var(--good-bg); color: var(--good); } .pill.bad { background: var(--bad-bg); color: var(--bad); }
-.error { background: var(--bad-bg); color: var(--bad); padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; }
-.band-low { background: var(--good-bg); } .band-mid { background: var(--mid-bg); }
-.outside td { opacity: .75; }
-.actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
-a { color: var(--accent); }
-summary { cursor: pointer; } summary h2 { display: inline-block; }
-</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header><div class="wrap"><a href="/">✈️ Radar de Milhas</a><span class="muted small">Brasil → Portugal & Espanha · dinheiro e milhas</span></div></header>
+<header class="topbar">
+  <div class="wrap">
+    <a class="brand" href="/"><span class="brand-mark" aria-hidden="true"></span><b>Radar de Milhas</b><span>Brasil para Portugal e Espanha</span></a>
+    <nav class="small muted" aria-label="Fontes ativas">Fontes: {% for p in settings.providers %}{{ p | source }}{% if not loop.last %}, {% endif %}{% endfor %}</nav>
+  </div>
+</header>
 <main class="wrap">{% block content %}{% endblock %}</main>
+<script src="/static/app.js" defer></script>
 </body>
 </html>

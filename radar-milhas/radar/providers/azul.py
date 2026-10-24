@@ -93,7 +93,7 @@ class AzulProvider(Provider):
         if cabin not in ("economy", "business"):
             cabin = "economy"
         quotes: list[FareQuote] = []
-        errors: list[str] = []
+        errors: list[ProviderError] = []
         for points in self.modes:
             url = search_url(origin, destination, day, adults, points)
             try:
@@ -101,14 +101,16 @@ class AzulProvider(Provider):
             except ProviderBlocked:
                 raise
             except ProviderError as exc:
-                errors.append(str(exc))
+                errors.append(exc)
                 continue
             payload = captured[-1].body
             self.dump(f"{origin}{destination}{day}-{'pts' if points else 'brl'}", payload)
             parsed = parse_azul(payload, day, cabin, points, self.settings.tax_estimate_brl, url)
             quotes.extend(q for q in parsed if q.origin == origin and q.destination == destination)
         if errors and len(errors) == len(self.modes):
-            raise ProviderError("; ".join(errors))
+            # Só vale tentar de novo se todas as falhas forem passageiras.
+            transient = all(e.transient for e in errors)
+            raise ProviderError("; ".join(dict.fromkeys(str(e) for e in errors)), transient=transient)
         return quotes
 
     async def close(self):

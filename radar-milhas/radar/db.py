@@ -348,3 +348,10 @@ class Database:
             "SELECT * FROM alerts WHERE watch_id = ? ORDER BY id DESC LIMIT ?", (watch_id, limit)
         )
         return [dict(r) for r in rows]
+
+    def purge_provider(self, provider: str) -> int:
+        """Apaga buscas, tarifas e execuções de uma fonte (ex.: dados de teste antigos)."""
+        cur = self.conn.execute("DELETE FROM searches WHERE provider = ?", (provider,))
+        self.conn.execute("DELETE FROM runs WHERE log LIKE ?", (f'%"provider": "{provider}"%',))
+        self.conn.commit()
+        return cur.rowcount

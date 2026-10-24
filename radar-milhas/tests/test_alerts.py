@@ -68,3 +68,23 @@ def test_notify_sends_alert_once(db, settings, watch, capsys):
     assert "Meta em dinheiro atingida" in notify(1500.0)  # caiu mais 3%: avisa de novo
     sent = db.list_alerts(watch.id)
     assert len(sent) == 2 and sent[0]["value"] == 3500
+
+
+def test_whatsapp_splits_and_strips_html(settings):
+    import httpx
+
+    from radar.notifier import send_whatsapp
+
+    settings.whatsapp_phone, settings.whatsapp_apikey = "+5531999999999", "123"
+    sent = []
+
+    def handler(request):
+        sent.append(dict(request.url.params))
+        return httpx.Response(200, text="Message queued")
+
+    text = "<b>Alerta</b>\n" + "\n".join(f"linha {i} com &amp; detalhes" for i in range(80))
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    asyncio.run(send_whatsapp(text, settings, client))
+    assert len(sent) > 1 and all(len(p["text"]) <= 900 for p in sent)
+    assert sent[0]["text"].startswith("Alerta") and "&" in sent[0]["text"] and "<b>" not in sent[0]["text"]
+    assert sent[0]["phone"] == "+5531999999999" and sent[0]["apikey"] == "123"

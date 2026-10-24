@@ -6,11 +6,12 @@ import asyncio
 import contextlib
 import json
 import logging
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..airports import GROUPS, airport_name, country_flag, expand_airports
@@ -19,7 +20,8 @@ from ..config import Settings
 from ..db import Database
 from ..models import CABINS, FareKind, Watch, program_label
 from ..notifier import brl, fmt_date, miles_fmt
-from ..runner import analyze_watch, run_all
+from ..providers import PROVIDER_LABELS
+from ..runner import PROGRESS, analyze_watch, run_all
 
 log = logging.getLogger(__name__)
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -29,7 +31,44 @@ TEMPLATES.env.filters.update(
 TEMPLATES.env.globals.update(FareKind=FareKind, GROUPS=GROUPS, CABINS=CABINS)
 
 WEEKDAYS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
+CABIN_LABELS = {"economy": "Econômica", "premium": "Premium", "business": "Executiva", "first": "Primeira"}
 TEMPLATES.env.filters["weekday"] = lambda d: WEEKDAYS[d.weekday()]
+TEMPLATES.env.filters["cabin"] = lambda c: CABIN_LABELS.get(c, c)
+TEMPLATES.env.filters["source"] = lambda k: PROVIDER_LABELS.get(k, k)
+TEMPLATES.env.filters["stamp"] = lambda iso: datetime.fromisoformat(iso).strftime("%d/%m %H:%M") if iso else ""
+TEMPLATES.env.globals.update(CABIN_LABELS=CABIN_LABELS, PROVIDER_LABELS=PROVIDER_LABELS)
+
+
+def short_brl(value: float | None) -> str:
+    """Preço compacto para a grade do calendário: 2130 -> '2,1 mil'."""
+    if value is None:
+        return ""
+    if value >= 1000:
+        return f"{value / 1000:.1f} mil".replace(".", ",")
+    return f"{value:.0f}"
+
+
+TEMPLATES.env.filters["short_brl"] = short_brl
+
+HINTS = (
+    ("não está instalado", "Instale o navegador: pip install playwright e depois python -m playwright install chromium."),
+    ("bloqueou", "O site pediu verificação antirrobô. Deixe RADAR_BROWSER_HEADLESS=false, rode a busca de novo e, "
+                 "se aparecer um desafio na janela do navegador, resolva uma vez. Os cookies ficam salvos."),
+    ("formato de resposta inesperado", "O site mudou o formato. Rode radar diagnostico e envie os arquivos de "
+                                       "data/debug para ajustar o conector."),
+    ("não retornou resultados", "A página não carregou a busca a tempo. Tente de novo; se repetir, aumente "
+                                "RADAR_BROWSER_TIMEOUT no arquivo .env."),
+    ("chave", "Confira a chave de API no arquivo .env."),
+    ("limite", "O limite de buscas da fonte acabou por hoje. A próxima varredura tenta de novo."),
+)
+
+
+def hint_for(message: str) -> str:
+    lower = (message or "").lower()
+    return next((hint for key, hint in HINTS if key in lower), "Tente de novo mais tarde. Se repetir, rode radar diagnostico.")
+
+
+TEMPLATES.env.filters["hint"] = hint_for
 
 
 def _opt_int(value: str | None) -> int | None:
@@ -74,6 +113,7 @@ def create_app(settings: Settings | None = None, with_scheduler: bool = False) -
         db.close()
 
     app = FastAPI(title="Radar de Milhas", lifespan=lifespan)
+    app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
     app.state.db = db
     app.state.settings = settings
 
@@ -81,12 +121,21 @@ def create_app(settings: Settings | None = None, with_scheduler: bool = False) -
         ctx.setdefault("settings", settings)
         return TEMPLATES.TemplateResponse(request, name, ctx, status_code=status_code)
 
+    def is_running(watch_id: int) -> bool:
+        return watch_id in running or watch_id in PROGRESS
+
+    def last_run(watch_id: int) -> dict | None:
+        history = db.run_history(watch_id, limit=1)
+        if not history:
+            return None
+        run = history[0]
+        run["log"] = json.loads(run["log"]) if run.get("log") else []
+        run["issues"] = [s for s in run["log"] if s.get("stopped")]
+        return run
+
     def index_context() -> dict:
-        watches = []
-        for w in db.list_watches():
-            history = db.run_history(w.id, limit=1)
-            watches.append({"watch": w, "last": history[0] if history else None, "running": w.id in running})
-        return {"watches": watches, "health": db.provider_health(), "today": date.today()}
+        watches = [{"watch": w, "last": last_run(w.id), "running": is_running(w.id)} for w in db.list_watches()]
+        return {"watches": watches, "today": date.today()}
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
@@ -153,14 +202,21 @@ def create_app(settings: Settings | None = None, with_scheduler: bool = False) -
             h["log"] = json.loads(h["log"]) if h.get("log") else []
         return render(
             request, "watch.html", watch=watch, a=analysis, outbound=outbound, inbound=inbound,
-            history=history, running=watch.id in running, alerts=db.list_alerts(watch.id),
+            history=history, last=last_run(watch.id), running=is_running(watch.id),
+            progress=PROGRESS.get(watch.id), alerts=db.list_alerts(watch.id),
             active_alerts=evaluate(analysis, settings),
         )
+
+    @app.get("/watches/{watch_id}/status")
+    async def watch_status(watch_id: int):
+        get_or_404(watch_id)
+        state = PROGRESS.get(watch_id) or {}
+        return JSONResponse({"running": is_running(watch_id), "providers": state.get("providers", {})})
 
     @app.post("/watches/{watch_id}/run")
     async def run_now(watch_id: int):
         watch = get_or_404(watch_id)
-        if watch.id not in running:
+        if not is_running(watch.id):
             running.add(watch.id)
 
             async def job():

@@ -1,144 +1,245 @@
 {% extends "base.html" %}
-{% block title %}{{ watch.name }} · Radar de Milhas{% endblock %}
+{% block title %}{{ watch.origins | join(",") }} para {{ watch.destinations | join(",") }} · Radar de Milhas{% endblock %}
 
-{% macro leg(l) -%}
-  {%- set q = l.quote -%}
-  <b>{{ q.date | dmy }}</b> <span class="muted small">{{ q.date | weekday }}{% if q.departure_time %} {{ q.departure_time }}{% endif %}</span><br>
-  {{ q.origin }}→{{ q.destination }} {{ q.destination | flag }}
-  {% if q.kind == FareKind.CASH %}· {{ q.price_brl | brl }}
-  {% else %}· {{ q.miles | miles }} <span class="muted small">{{ q.program | program }}</span> + {% if q.taxes_estimated %}~{% endif %}{{ q.taxes_brl | brl }}{% endif %}<br>
-  <span class="muted small">{{ q.airline }}{% if q.flight_numbers %} · {{ q.flight_numbers }}{% endif %} · {{ "direto" if q.stops == 0 else q.stops ~ " parada(s)" }} · via {{ q.provider }}</span>
-  {% if q.booking_url %}<br><a class="small" href="{{ q.booking_url }}" target="_blank" rel="noopener">abrir no site</a>{% endif %}
+{% macro leg_price(q) -%}
+  {%- if q.kind == FareKind.CASH -%}<span class="num">{{ q.price_brl | brl }}</span>
+  {%- else -%}<span class="num">{{ q.miles | miles }}</span> {{ q.program | program }} + <span class="num">{% if q.taxes_estimated %}~{% endif %}{{ q.taxes_brl | brl }}</span>{%- endif -%}
 {%- endmacro %}
 
-{% macro trips_table(trips, show_saving=False) -%}
-<div class="table-wrap"><table>
-  <tr><th>Total ({{ watch.adults }} adulto{{ "s" if watch.adults > 1 }})</th><th>Ida</th>{% if watch.round_trip %}<th>Volta</th>{% endif %}</tr>
-  {% for t in trips %}
-  <tr>
-    <td><b>{{ (t.cost_brl * watch.adults) | brl }}</b>
-      {% if t.total_miles %}<br><span class="small">{{ (t.total_miles * watch.adults) | miles }} milhas + {{ (t.cash_out_of_pocket * watch.adults) | brl }}</span>{% endif %}
-      {% if t.nights %}<br><span class="muted small">{{ t.nights }} noites</span>{% endif %}
-      {% if t.open_jaw %}<br><span class="pill" title="Chega numa cidade e volta de outra">{{ t.outbound.quote.destination }} → {{ t.inbound.quote.origin }} por sua conta</span>{% endif %}
-      {% if show_saving and t.saving_vs_window %}<br><span class="pill good">{{ "%.0f" | format(t.saving_vs_window * 100) }}% mais barato</span>{% endif %}
-    </td>
-    <td>{{ leg(t.outbound) }}</td>
-    {% if watch.round_trip %}<td>{{ leg(t.inbound) if t.inbound else "—" }}</td>{% endif %}
-  </tr>
-  {% endfor %}
-</table></div>
+{% macro stops(q) -%}{{ "direto" if q.stops == 0 else (q.stops ~ (" parada" if q.stops == 1 else " paradas")) }}{%- endmacro %}
+
+{% macro pass_leg(label, l) -%}
+{% set q = l.quote %}
+<div class="pass-leg">
+  <div class="pass-dir">{{ label }}</div>
+  <div>
+    <div class="pass-codes">
+      <span>{{ q.origin }}</span><span class="arrow" aria-label="para">→</span><span>{{ q.destination }}</span>
+      <time datetime="{{ q.date }}">{{ q.date | weekday }} {{ q.date | dmy }}{% if q.departure_time %} · {{ q.departure_time }}{% endif %}</time>
+    </div>
+    <div class="pass-detail">
+      <strong>{{ leg_price(q) }}</strong>
+      {% if q.airline %}<span>{{ q.airline }}</span>{% endif %}
+      <span>{{ stops(q) }}</span>
+      {% if q.flight_numbers %}<span class="num">{{ q.flight_numbers }}</span>{% endif %}
+      {% if q.booking_url %}<a href="{{ q.booking_url }}" target="_blank" rel="noopener">Abrir no site ({{ q.provider | source }})</a>{% endif %}
+    </div>
+  </div>
+</div>
 {%- endmacro %}
 
-{% macro trend_pill(t) -%}
-  {% if t and t.pct is not none %}
-    {% if t.is_record %}<span class="pill good">menor já visto</span>
-    {% elif t.pct <= -0.05 %}<span class="pill good">{{ "%.0f" | format(t.pct * 100) }}% vs média</span>
-    {% elif t.pct >= 0.05 %}<span class="pill bad">+{{ "%.0f" | format(t.pct * 100) }}% vs média</span>
-    {% else %}<span class="pill">estável</span>{% endif %}
-  {% endif %}
+{% macro trip_row(t) -%}
+<div class="trip">
+  <div>
+    <div class="trip-dates">{{ t.outbound.date | dmy }}{% if t.inbound %} a {{ t.inbound.date | dmy }}{% endif %}
+      {% if t.nights %}<span class="muted small"> · {{ t.nights }} noites</span>{% endif %}
+      {% if t.saving_vs_window %}<span class="tag good">{{ "%.0f" | format(t.saving_vs_window * 100) }}% mais barato</span>{% endif %}
+    </div>
+    <div class="trip-legs">
+      {% for l in t.legs %}{{ l.quote.origin }}→{{ l.quote.destination }} {{ l.quote.airline or (l.quote.program | program) }}, {{ stops(l.quote) }}{% if not loop.last %} · {% endif %}{% endfor %}
+      {% if t.open_jaw %} · volta de outra cidade{% endif %}
+    </div>
+  </div>
+  <div class="trip-price">
+    {% if t.total_miles %}
+      <span class="price">{{ (t.total_miles * watch.adults) | miles }} milhas</span>
+      <span class="small num">+ {{ (t.cash_out_of_pocket * watch.adults) | brl }}{% if t.taxes_estimated %} (taxa estimada){% endif %}</span>
+    {% else %}
+      <span class="price">{{ (t.cost_brl * watch.adults) | brl }}</span>
+    {% endif %}
+  </div>
+</div>
 {%- endmacro %}
 
 {% macro calendar(rows, title) -%}
-<details><summary><h2>{{ title }}</h2></summary>
-<div class="table-wrap"><table>
-  <tr><th>Data</th><th>Melhor em dinheiro</th><th>Melhor em milhas</th></tr>
-  {% for r in rows %}
-  <tr class="band-{{ r.band }} {{ '' if r.in_window else 'outside' }}">
-    <td><b>{{ r.date | dmy }}</b> <span class="muted small">{{ r.date | weekday }}</span>{% if not r.in_window %} <span class="pill">fora da janela</span>{% endif %}</td>
-    <td>{% if r.cash %}{{ r.cash.quote.price_brl | brl }} <span class="muted small">{{ r.cash.quote.origin }}→{{ r.cash.quote.destination }} · {{ r.cash.quote.airline }}</span>{% else %}—{% endif %}</td>
-    <td>{% if r.miles %}{{ r.miles.quote.miles | miles }} <span class="muted small">{{ r.miles.quote.program | program }} · {{ r.miles.quote.origin }}→{{ r.miles.quote.destination }}</span> <span class="small">(≈ {{ r.miles.cost_brl | brl }})</span>{% else %}—{% endif %}</td>
-  </tr>
-  {% endfor %}
-</table></div>
-</details>
+<div class="panel">
+  <h3>{{ title }}</h3>
+  <div class="cal">
+    {% for r in rows %}
+    <div class="day band-{{ r.band }}{{ '' if r.in_window else ' outside' }}" title="{{ 'Fora da sua janela' if not r.in_window else '' }}">
+      <div class="day-head"><span class="d">{{ r.date.strftime('%d/%m') }}</span><span class="w">{{ r.date | weekday }}</span></div>
+      <div class="p">
+        {% if r.cash %}<span>R$ {{ r.cash.quote.price_brl | short_brl }}</span>{% endif %}
+        {% if r.miles %}<span>{{ ((r.miles.quote.miles or 0) / 1000) | round(0) | int }} mil milhas</span>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
 {%- endmacro %}
 
 {% block content %}
-<p class="small"><a href="/">← radares</a></p>
-<h1>{{ watch.name }} {% if not watch.active %}<span class="pill">pausado</span>{% endif %}</h1>
-<p class="muted">
-  {{ watch.origins | join(", ") }} → {{ watch.destinations | join(", ") }} ·
-  {{ watch.start_date | dmy }} a {{ watch.end_date | dmy }} ·
-  {% if watch.round_trip %}ida e volta, {{ watch.min_nights }}–{{ watch.max_nights }} noites{% else %}só ida{% endif %} ·
-  {{ watch.adults }} adulto(s) · {{ watch.cabin }}{% if watch.max_stops is not none %} · até {{ watch.max_stops }} parada(s){% endif %}
-  · explorando ±{{ watch.explore_days }} dias
-</p>
-<div class="actions">
-  <form class="inline" method="post" action="/watches/{{ watch.id }}/run"><button {% if running %}disabled{% endif %}>{{ "Buscando…" if running else "Buscar agora" }}</button></form>
-  <form class="inline" method="post" action="/watches/{{ watch.id }}/toggle"><button class="ghost">{{ "Pausar" if watch.active else "Reativar" }}</button></form>
-  <form class="inline" method="post" action="/watches/{{ watch.id }}/delete" onsubmit="return confirm('Excluir este radar?')"><button class="danger">Excluir</button></form>
+<a class="crumb" href="/">← Seus radares</a>
+<div class="radar-head">
+  <div>
+    <h1>{{ watch.origins | join(" ") }}<span class="arrow" aria-label="para">→</span>{{ watch.destinations | join(" ") }}</h1>
+    <div class="facts">
+      <span>{{ watch.name }}</span>
+      <span class="num">{{ watch.start_date | dmy }} a {{ watch.end_date | dmy }}</span>
+      <span>{% if watch.round_trip %}Ida e volta, {{ watch.min_nights }} a {{ watch.max_nights }} noites{% else %}Só ida{% endif %}</span>
+      <span>{{ watch.adults }} adulto{{ "s" if watch.adults > 1 }} · {{ watch.cabin | cabin }}</span>
+      {% if not watch.active %}<span class="tag">Pausado</span>{% endif %}
+    </div>
+  </div>
+  <div class="actions">
+    <form class="inline" method="post" action="/watches/{{ watch.id }}/run">
+      <button class="btn btn-primary" {% if running %}disabled{% endif %}>{{ "Buscando…" if running else "Buscar agora" }}</button>
+    </form>
+    <form class="inline" method="post" action="/watches/{{ watch.id }}/toggle"><button class="btn btn-quiet">{{ "Pausar" if watch.active else "Reativar" }}</button></form>
+    <form class="inline" method="post" action="/watches/{{ watch.id }}/delete" onsubmit="return confirm('Excluir este radar e o histórico dele?')"><button class="btn btn-danger">Excluir</button></form>
+  </div>
 </div>
-{% if running %}<p class="muted small">Busca em andamento. Atualize a página em alguns minutos.</p>{% endif %}
 
-{% if a.is_empty %}
-<div class="card">Ainda não há tarifas para a sua janela. Clique em <b>Buscar agora</b> ou aguarde a varredura diária.</div>
+{# ---------- estado da busca ---------- #}
+<section aria-live="polite">
+{% if running %}
+  <div class="notice working" data-status-url="/watches/{{ watch.id }}/status">
+    <h3>Buscando nos sites das companhias</h3>
+    <p class="small muted">O bot abre a LATAM, a Smiles e a Azul como uma pessoa faria, uma data por vez. Leva alguns minutos; esta página atualiza sozinha.</p>
+    <div class="progress-list">
+      {% for key, p in (progress.providers if progress else {}).items() %}
+      <div class="progress-row"><strong>{{ p.label }}</strong><div class="bar{{ '' if p.total else ' indeterminate' }}"><span style="width: {{ (100 * p.done / p.total) | round | int if p.total else 0 }}%"></span></div><span class="muted num">{{ p.done }} de {{ p.total }}</span></div>
+      {% else %}
+      <div class="progress-row"><strong>Preparando</strong><div class="bar indeterminate"><span></span></div><span></span></div>
+      {% endfor %}
+    </div>
+  </div>
+{% elif not last %}
+  <div class="empty">
+    <h2>Este radar ainda não buscou</h2>
+    <p>Clique em <strong>Buscar agora</strong> para a primeira busca. Ela leva alguns minutos, porque o bot consulta cada data nos sites da LATAM, Smiles e Azul. Depois disso, ele busca sozinho todo dia às {{ settings.run_at }}.</p>
+    <form method="post" action="/watches/{{ watch.id }}/run"><button class="btn btn-primary">Buscar agora</button></form>
+  </div>
 {% else %}
-<div class="grid">
-  <div class="card stat"><div class="label">Melhor em dinheiro</div>
-    <div class="value">{{ (a.best_cash[0].cost_brl * watch.adults) | brl if a.best_cash else "—" }}</div>{{ trend_pill(a.trend.cash) }}</div>
-  <div class="card stat"><div class="label">Melhor em milhas</div>
-    <div class="value">{{ (a.best_miles[0].total_miles * watch.adults) | miles if a.best_miles else "—" }}</div>
-    {% if a.best_miles %}<span class="small">+ {{ (a.best_miles[0].cash_out_of_pocket * watch.adults) | brl }} taxas · ≈ {{ (a.best_miles[0].cost_brl * watch.adults) | brl }}</span><br>{% endif %}
-    {{ trend_pill(a.trend.miles) }}</div>
-  <div class="card stat"><div class="label">Melhor combinação</div>
-    <div class="value">{{ (a.best_overall[0].cost_brl * watch.adults) | brl if a.best_overall else "—" }}</div>{{ trend_pill(a.trend.overall) }}</div>
-</div>
+  {% for group in last.issues | groupby("stopped") %}
+  <div class="notice error" role="alert">
+    <h3>{% for s in group.list %}{{ s.provider | source }}{% if not loop.last %}{{ " e " if loop.revindex == 2 else ", " }}{% endif %}{% endfor %}: a busca falhou</h3>
+    <p>{{ group.grouper[:1] | upper }}{{ group.grouper[1:] }}</p>
+    {% if "Rode:" not in group.grouper %}<p class="small muted">{{ group.grouper | hint }}</p>{% endif %}
+  </div>
+  {% endfor %}
+  {% if a.is_empty and last.issues | length < last.log | length %}
+  <div class="notice{{ ' error' if last.issues else '' }}">
+    <h3>Nenhuma passagem encontrada para a sua janela</h3>
+    <p class="small muted">Última busca em {{ last.finished_at | stamp }}: {{ last.n_searches }} consultas, {{ last.n_quotes }} tarifas.
+      {% if not last.issues %}As companhias podem não ter voos ou assentos-prêmio nessas datas. Tente ampliar a janela ou o número de noites.{% endif %}</p>
+  </div>
+  {% elif not a.is_empty %}
+  <p class="small muted">Atualizado em {{ last.finished_at | stamp }} · {{ last.n_quotes }} tarifas novas de {{ last.log | length }} fonte(s). Próxima busca automática às {{ settings.run_at }}.</p>
+  {% else %}
+  <p class="small muted">Última tentativa em {{ last.finished_at | stamp }}. Corrija o problema acima e clique em Buscar agora.</p>
+  {% endif %}
+{% endif %}
+</section>
+
+{# ---------- assinatura: melhor opção ---------- #}
+{% if a.best_overall %}{% set best = a.best_overall[0] %}
+<section>
+  <div class="section-head"><h2>Melhor opção agora</h2><p>Dinheiro e milhas comparados pelo seu custo do milheiro</p></div>
+  <article class="pass" aria-label="Melhor opção">
+    <div class="pass-legs">
+      {{ pass_leg("Ida", best.outbound) }}
+      {% if best.inbound %}{{ pass_leg("Volta", best.inbound) }}{% endif %}
+    </div>
+    <div class="pass-stub">
+      <div>
+        <div class="eyebrow">Total {{ "por pessoa" if watch.adults == 1 else "para " ~ watch.adults ~ " adultos" }}</div>
+        {% if best.total_miles %}
+          <div class="total">{{ (best.total_miles * watch.adults) | miles }}</div>
+          <div class="sub">milhas + {{ (best.cash_out_of_pocket * watch.adults) | brl }} em dinheiro</div>
+          <div class="sub">equivale a {{ (best.cost_brl * watch.adults) | brl }}</div>
+        {% else %}
+          <div class="total">{{ (best.cost_brl * watch.adults) | brl }}</div>
+          <div class="sub">em dinheiro</div>
+        {% endif %}
+      </div>
+      <div class="sub">{% if best.nights %}{{ best.nights }} noites{% endif %}{% if best.open_jaw %} · chega em {{ best.outbound.quote.destination }}, volta de {{ best.inbound.quote.origin }}{% endif %}</div>
+    </div>
+  </article>
+</section>
 {% endif %}
 
-<h2 id="alertas">🔔 Alertas de preço baixo</h2>
-<div class="card">
-  <p class="small muted" style="margin-top:0">Você recebe um aviso (Telegram/e-mail) quando a ida e volta por pessoa ficar abaixo da meta,
-  quando aparecer o menor preço já visto, quando o preço cair {{ "%.0f" | format(settings.deal_threshold * 100) }}% abaixo da média
-  ou quando surgir uma data fora da janela bem mais barata. O mesmo alerta só se repete se o preço cair mais 3% ou após 7 dias.</p>
-  <form method="post" action="/watches/{{ watch.id }}/metas" class="form-grid">
-    <div><label>Meta em R$ por pessoa</label><input name="meta_dinheiro" inputmode="decimal" placeholder="4500" value="{{ '%.0f' | format(watch.target_cash_brl) if watch.target_cash_brl else '' }}"></div>
-    <div><label>Meta em milhas por pessoa</label><input name="meta_milhas" inputmode="numeric" placeholder="140000" value="{{ watch.target_miles or '' }}"></div>
-    <div style="align-self:end"><button type="submit">Salvar metas</button></div>
-  </form>
-  {% if active_alerts %}<p>⚡ Agora: {% for al in active_alerts %}<span class="pill good">{{ al.title }}</span> {% endfor %}</p>{% endif %}
-  {% if alerts %}
-  <div class="table-wrap" style="margin-top:12px"><table>
-    <tr><th>Enviado em</th><th>Alerta</th></tr>
-    {% for al in alerts %}<tr><td class="small">{{ al.sent_at[:16].replace("T", " ") }}</td><td>{{ al.message }}</td></tr>{% endfor %}
-  </table></div>
-  {% else %}<p class="small muted">Nenhum alerta enviado ainda.</p>{% endif %}
-</div>
+{# ---------- dinheiro x milhas ---------- #}
+{% if a.best_cash or a.best_miles %}
+<section>
+  <div class="section-head"><h2>Dinheiro ou milhas?</h2><p>As 3 melhores datas de cada forma de pagamento</p></div>
+  <div class="compare">
+    <div class="panel">
+      <h3>Em dinheiro {% if a.best_cash %}<span class="muted small">a partir de {{ (a.best_cash[0].cost_brl * watch.adults) | brl }}</span>{% endif %}</h3>
+      {% for t in a.best_cash[:3] %}{{ trip_row(t) }}{% else %}<p class="small muted">Nenhuma tarifa em dinheiro na janela.</p>{% endfor %}
+    </div>
+    <div class="panel">
+      <h3>Em milhas {% if a.best_miles %}<span class="muted small">equivale a {{ (a.best_miles[0].cost_brl * watch.adults) | brl }}</span>{% endif %}</h3>
+      {% for t in a.best_miles[:3] %}{{ trip_row(t) }}{% else %}<p class="small muted">Nenhuma emissão em milhas na janela.</p>{% endfor %}
+    </div>
+  </div>
+  {% if a.miles_value %}
+  <div class="value-list mt-4">
+    {% for mv in a.miles_value %}
+    <div class="value-row">
+      <div><strong>{{ mv.label }}</strong> <span class="small muted">rende {{ mv.median_value | brl }} por milheiro; seu custo é {{ mv.your_cost | brl }}</span></div>
+      <span class="small muted">{{ mv.samples }} comparações</span>
+      <span class="tag {{ 'bad' if 'dinheiro' in mv.verdict else 'good' }}">{{ mv.verdict }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+{% endif %}
 
+{# ---------- sugestões ---------- #}
 {% if a.suggestions %}
-<h2>📅 Sugestões fora do seu radar</h2>
-<p class="muted small">Datas até {{ watch.explore_days }} dias antes/depois da sua janela que estão pelo menos {{ "%.0f" | format(settings.suggestion_min_saving * 100) }}% mais baratas que a melhor opção dentro dela.</p>
-{{ trips_table(a.suggestions, show_saving=True) }}
+<section>
+  <div class="section-head"><h2>Datas fora do seu radar</h2><p>Até {{ watch.explore_days }} dias antes ou depois, pelo menos {{ "%.0f" | format(settings.suggestion_min_saving * 100) }}% mais baratas</p></div>
+  <div class="panel">{% for t in a.suggestions %}{{ trip_row(t) }}{% endfor %}</div>
+</section>
 {% endif %}
 
-{% if a.best_overall %}<h2>🏆 Melhor combinação (ida e volta podem ser por programas diferentes)</h2>{{ trips_table(a.best_overall) }}{% endif %}
-{% if a.best_cash %}<h2>💵 Melhores em dinheiro</h2>{{ trips_table(a.best_cash) }}{% endif %}
-{% if a.best_miles %}<h2>🎯 Melhores em milhas</h2>{{ trips_table(a.best_miles) }}{% endif %}
-
-{% if a.miles_value %}
-<h2>💡 Vale usar milhas?</h2>
-<p class="muted small">Compara, na mesma rota e data, a tarifa em dinheiro com a emissão em milhas: (tarifa − taxas) ÷ milheiros.</p>
-<div class="table-wrap"><table>
-  <tr><th>Programa</th><th>Rendimento mediano</th><th>Melhor rendimento</th><th>Seu custo do milheiro</th><th>Veredito</th></tr>
-  {% for mv in a.miles_value %}
-  <tr><td>{{ mv.label }}</td><td>{{ mv.median_value | brl }}</td><td>{{ mv.best_value | brl }}</td><td>{{ mv.your_cost | brl }}</td>
-      <td><span class="pill {{ 'bad' if 'dinheiro' in mv.verdict else 'good' }}">{{ mv.verdict }}</span> <span class="muted small">({{ mv.samples }} comparações)</span></td></tr>
-  {% endfor %}
-</table></div>
+{# ---------- calendário ---------- #}
+{% if outbound or inbound %}
+<section>
+  <div class="section-head"><h2>Calendário de preços</h2><p>Menor preço por pessoa em cada data</p></div>
+  <div class="stack">
+    {% if outbound %}{{ calendar(outbound, "Ida") }}{% endif %}
+    {% if inbound %}{{ calendar(inbound, "Volta") }}{% endif %}
+  </div>
+  <div class="legend"><span><i class="low"></i>mais barato</span><span><i class="mid"></i>médio</span><span><i></i>mais caro</span><span><i class="out"></i>fora da sua janela</span></div>
+</section>
 {% endif %}
 
-{% if outbound %}{{ calendar(outbound, "🗓️ Calendário de preços — ida (por pessoa)") }}{% endif %}
-{% if inbound %}{{ calendar(inbound, "🗓️ Calendário de preços — volta (por pessoa)") }}{% endif %}
+{# ---------- alertas ---------- #}
+<section id="alertas">
+  <div class="section-head"><h2>Alertas de preço</h2><p>Aviso por WhatsApp, Telegram ou e-mail; o mesmo alerta só volta se o preço cair mais 3% ou após 7 dias</p></div>
+  <form class="form-card" method="post" action="/watches/{{ watch.id }}/metas">
+    <div class="grid-2">
+      <div class="field"><label for="meta_dinheiro">Me avise abaixo de (R$, por pessoa, ida e volta)</label><input id="meta_dinheiro" name="meta_dinheiro" inputmode="decimal" placeholder="Ex.: 4500" value="{{ '%.0f' | format(watch.target_cash_brl) if watch.target_cash_brl else '' }}"></div>
+      <div class="field"><label for="meta_milhas">Me avise abaixo de (milhas, por pessoa, ida e volta)</label><input id="meta_milhas" name="meta_milhas" inputmode="numeric" placeholder="Ex.: 140000" value="{{ watch.target_miles or '' }}"></div>
+    </div>
+    <div class="actions"><button class="btn btn-primary" type="submit">Salvar alertas</button>
+      {% for al in active_alerts %}<span class="tag good">{{ al.title }}</span>{% endfor %}</div>
+  </form>
+  {% if alerts %}
+  <div class="table-wrap mt-4"><table>
+    <thead><tr><th scope="col">Enviado</th><th scope="col">Alerta</th></tr></thead>
+    <tbody>{% for al in alerts %}<tr><td class="num">{{ al.sent_at | stamp }}</td><td>{{ al.message }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  {% endif %}
+</section>
 
+{# ---------- histórico ---------- #}
 {% if history %}
-<h2>Histórico de buscas</h2>
-<div class="table-wrap"><table>
-  <tr><th>Quando</th><th>Buscas</th><th>Tarifas</th><th>Erros</th><th>Melhor dinheiro</th><th>Melhor milhas (R$)</th><th>Fontes</th></tr>
-  {% for h in history %}
-  <tr><td class="small">{{ h.finished_at[:16].replace("T", " ") }}</td><td>{{ h.n_searches }}</td><td>{{ h.n_quotes }}</td><td>{{ h.n_errors }}</td>
-      <td>{{ h.best_cash_brl | brl }}</td><td>{{ h.best_miles_brl | brl }}</td>
-      <td class="small">{% for s in h.log %}{{ s.provider }}{% if s.stopped %} <span class="pill bad" title="{{ s.stopped }}">parou</span>{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
-  {% endfor %}
-</table></div>
+<section>
+  <details class="more">
+    <summary>Histórico de buscas ({{ history | length }})</summary>
+    <div class="table-wrap"><table>
+      <thead><tr><th scope="col">Quando</th><th scope="col" class="num">Consultas</th><th scope="col" class="num">Tarifas</th><th scope="col" class="num">Melhor em dinheiro</th><th scope="col" class="num">Melhor em milhas (R$)</th><th scope="col">Fontes</th></tr></thead>
+      <tbody>{% for h in history %}
+      <tr><td class="num">{{ h.finished_at | stamp }}</td><td class="num">{{ h.n_searches }}</td><td class="num">{{ h.n_quotes }}</td>
+        <td class="num">{{ h.best_cash_brl | brl if h.best_cash_brl else "sem dados" }}</td><td class="num">{{ h.best_miles_brl | brl if h.best_miles_brl else "sem dados" }}</td>
+        <td>{% for s in h.log %}<span class="tag {{ 'bad' if s.stopped else 'good' }}" title="{{ s.stopped }}">{{ s.provider | source }}</span> {% endfor %}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+  </details>
+</section>
 {% endif %}
-<p class="muted small">Valores em R$ das emissões em milhas usam seu custo do milheiro ({% for k, v in settings.milheiro.items() %}{{ k | program }} {{ v | brl }}{% if not loop.last %}, {% endif %}{% endfor %}). "~" indica taxa estimada: confirme no site antes de emitir.</p>
 {% endblock %}

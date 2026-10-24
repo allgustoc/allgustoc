@@ -14,6 +14,9 @@ DEFAULT_MILHEIRO = {
     "azul": 15.0,
 }
 
+# Fontes gratuitas, lidas dos próprios sites com um navegador automatizado.
+DEFAULT_PROVIDERS = ("latam", "smiles", "azul")
+
 DEFAULT_FX = {"BRL": 1.0, "USD": 5.40, "EUR": 6.30}
 
 
@@ -66,7 +69,7 @@ def _parse_map(raw: str) -> dict[str, float]:
 @dataclass
 class Settings:
     db_path: str = "data/radar.db"
-    providers: list[str] = field(default_factory=lambda: ["demo"])
+    providers: list[str] = field(default_factory=lambda: list(DEFAULT_PROVIDERS))
     run_at: str = "07:00"
     timezone: str = "America/Sao_Paulo"
 
@@ -90,7 +93,8 @@ class Settings:
     seats_aero_sources: str = ""
 
     # Navegador (Smiles / LATAM / Azul)
-    browser_headless: bool = True
+    # Janela visível por padrão: os sites bloqueiam navegadores "invisíveis" com mais frequência.
+    browser_headless: bool = False
     browser_profile_dir: str = "data/browser"
     browser_executable: str = ""
     browser_timeout: float = 45.0
@@ -101,6 +105,8 @@ class Settings:
     notify_mode: str = "digest"  # digest | deals
     telegram_token: str = ""
     telegram_chat_id: str = ""
+    whatsapp_phone: str = ""
+    whatsapp_apikey: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
@@ -116,7 +122,10 @@ class Settings:
         milheiro.update(_parse_map(_env("RADAR_MILHEIRO")))
         fx = dict(DEFAULT_FX)
         fx.update({k.upper(): v for k, v in _parse_map(_env("RADAR_FX")).items()})
-        providers = [p.strip().lower() for p in _env("RADAR_PROVIDERS", "demo").split(",") if p.strip()]
+        providers = [p.strip().lower() for p in _env("RADAR_PROVIDERS", ",".join(DEFAULT_PROVIDERS)).split(",") if p.strip()]
+        if not _env_bool("RADAR_ALLOW_DEMO", False):
+            # Dados sintéticos só nos testes; um .env antigo com "demo" passa a usar as fontes reais.
+            providers = [p for p in providers if p != "demo"] or list(DEFAULT_PROVIDERS)
         return cls(
             db_path=_env("RADAR_DB_PATH", cls.db_path),
             providers=providers,
@@ -135,7 +144,7 @@ class Settings:
             serpapi_key=_env("SERPAPI_KEY"),
             seats_aero_key=_env("SEATS_AERO_KEY"),
             seats_aero_sources=_env("SEATS_AERO_SOURCES"),
-            browser_headless=_env_bool("RADAR_BROWSER_HEADLESS", True),
+            browser_headless=_env_bool("RADAR_BROWSER_HEADLESS", False),
             browser_profile_dir=_env("RADAR_BROWSER_PROFILE_DIR", cls.browser_profile_dir),
             browser_executable=_env("RADAR_BROWSER_EXECUTABLE"),
             browser_timeout=_env_float("RADAR_BROWSER_TIMEOUT", cls.browser_timeout),
@@ -144,6 +153,8 @@ class Settings:
             notify_mode=_env("RADAR_NOTIFY", cls.notify_mode).lower(),
             telegram_token=_env("TELEGRAM_BOT_TOKEN"),
             telegram_chat_id=_env("TELEGRAM_CHAT_ID"),
+            whatsapp_phone=_env("WHATSAPP_PHONE"),
+            whatsapp_apikey=_env("WHATSAPP_APIKEY"),
             smtp_host=_env("SMTP_HOST"),
             smtp_port=_env_int("SMTP_PORT", cls.smtp_port),
             smtp_user=_env("SMTP_USER"),

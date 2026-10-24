@@ -20,11 +20,13 @@ from .models import Analysis, FareKind, Leg, Trip, program_label
 log = logging.getLogger(__name__)
 
 TELEGRAM_LIMIT = 4000
+WHATSAPP_LIMIT = 900
+CALLMEBOT_URL = "https://api.callmebot.com/whatsapp.php"
 
 
 def brl(value: float | None) -> str:
     if value is None:
-        return "—"
+        return "sem dados"
     return "R$ " + f"{value:,.0f}".replace(",", ".")
 
 
@@ -153,6 +155,23 @@ async def send_telegram(text: str, settings: Settings, client: httpx.AsyncClient
             await client.aclose()
 
 
+async def send_whatsapp(text: str, settings: Settings, client: httpx.AsyncClient | None = None) -> None:
+    """WhatsApp para o seu próprio número via CallMeBot (gratuito, sem conta comercial)."""
+    own = client is None
+    client = client or httpx.AsyncClient(timeout=30)
+    try:
+        for part in _split(_strip_html(text), WHATSAPP_LIMIT):
+            resp = await client.get(
+                CALLMEBOT_URL,
+                params={"phone": settings.whatsapp_phone, "text": part, "apikey": settings.whatsapp_apikey},
+            )
+            if resp.status_code >= 400:
+                log.error("WhatsApp (CallMeBot) respondeu %s: %s", resp.status_code, resp.text[:300])
+    finally:
+        if own:
+            await client.aclose()
+
+
 def _strip_html(text: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", text))
 
@@ -194,6 +213,11 @@ async def _deliver(subject: str, text: str, settings: Settings) -> None:
             await send_telegram(text, settings)
         except httpx.HTTPError as exc:
             log.error("Falha ao enviar Telegram: %s", exc)
+    if settings.whatsapp_phone and settings.whatsapp_apikey:
+        try:
+            await send_whatsapp(text, settings)
+        except httpx.HTTPError as exc:
+            log.error("Falha ao enviar WhatsApp: %s", exc)
     if settings.smtp_host and settings.email_to:
         try:
             await asyncio.to_thread(send_email, subject, text, settings)

@@ -95,7 +95,7 @@ class SmilesProvider(Provider):
         payload = captured[-1].body
         self.dump(f"{origin}{destination}{day}", payload)
         if not isinstance(payload, dict) or "requestedFlightSegmentList" not in payload:
-            raise ProviderError("Smiles: formato de resposta inesperado (veja RADAR_DEBUG_DUMP_DIR)", transient=False)
+            raise ProviderError("formato de resposta inesperado do site (rode radar diagnostico)", transient=False)
         parsed = parse_smiles(payload, day, cabin, self.settings.smiles_club, url)
         for q, _ in parsed:
             q.origin, q.destination = q.origin or origin, q.destination or destination

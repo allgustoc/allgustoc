@@ -143,6 +143,67 @@ def cmd_probe(args, settings: Settings, db) -> int:
     return 0
 
 
+def cmd_diagnose(args, settings: Settings, db: Database) -> int:
+    """Testa cada fonte configurada numa rota real e explica o que fazer se falhar."""
+    from datetime import timedelta
+
+    from .providers import PROVIDER_LABELS, create_providers
+    from .providers.browser import BrowserSession
+
+    settings.debug_dump_dir = settings.debug_dump_dir or "data/debug"
+    watches = db.list_watches(only_active=True)
+    if args.origem and args.destino:
+        origin, destination = args.origem.upper(), args.destino.upper()
+        day = args.data or date.today() + timedelta(days=60)
+    elif watches:
+        w = watches[0]
+        origin, destination = w.origins[0], w.destinations[0]
+        day = max(w.start_date, date.today() + timedelta(days=1))
+    else:
+        origin, destination, day = "GRU", "LIS", date.today() + timedelta(days=60)
+    print(f"Fontes configuradas (RADAR_PROVIDERS): {', '.join(settings.providers) or 'nenhuma'}")
+    print(f"Rota de teste: {origin} → {destination} em {day:%d/%m/%Y}\n")
+
+    async def go() -> int:
+        failures_total = 0
+        providers, failures = create_providers(settings)
+        for key, msg in failures:
+            failures_total += 1
+            print(f"✗ {PROVIDER_LABELS.get(key, key)}: {msg}")
+        if any(p.key in ("smiles", "latam", "azul") for p in providers):
+            session = BrowserSession(settings, "diagnostico")
+            try:
+                await session._ensure()
+                print("✓ Navegador automatizado: abre normalmente")
+            except Exception as exc:
+                print(f"✗ Navegador automatizado: {exc}\n  Rode: python -m playwright install chromium")
+                return 1
+            finally:
+                await session.close()
+        for provider in providers:
+            label = PROVIDER_LABELS.get(provider.key, provider.key)
+            try:
+                quotes = await provider.search(origin, destination, day, 1, "economy")
+            except Exception as exc:
+                failures_total += 1
+                print(f"✗ {label}: {exc}")
+                continue
+            finally:
+                await provider.close()
+            cash = sorted((q for q in quotes if q.kind == "cash"), key=lambda q: q.price_brl or 0)
+            miles = sorted((q for q in quotes if q.kind == "miles"), key=lambda q: q.miles or 0)
+            print(f"✓ {label}: {len(cash)} tarifas em dinheiro, {len(miles)} em milhas")
+            for q in (cash[:2] + miles[:2]):
+                print("    " + leg_text(Leg(q, effective_cost_brl(q, settings))))
+            if not quotes:
+                print("    Nenhum voo nesta data. Pode ser falta de disponibilidade ou mudança no site;"
+                      f" envie os arquivos de {settings.debug_dump_dir}/ para análise.")
+        print(f"\nRespostas brutas salvas em {settings.debug_dump_dir}/")
+        return 1 if failures_total else 0
+
+    return asyncio.run(go())
+
+
 def cmd_web(args, settings, db) -> int:
     import uvicorn
 
@@ -223,6 +284,12 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--adultos", type=int, default=1)
     pr.set_defaults(func=cmd_probe)
 
+    dg = sub.add_parser("diagnostico", help="Testar as fontes reais numa rota e mostrar o que falhou")
+    dg.add_argument("--origem")
+    dg.add_argument("--destino")
+    dg.add_argument("--data", type=_date)
+    dg.set_defaults(func=cmd_diagnose)
+
     w = sub.add_parser("web", help="Painel web para cadastrar e acompanhar radares")
     w.add_argument("--host", default="127.0.0.1")
     w.add_argument("--porta", type=int, default=8000)
@@ -245,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     settings = Settings.from_env()
     db = Database(settings.db_path)
+    if "demo" not in settings.providers and db.purge_provider("demo"):
+        print("Dados de teste antigos removidos; o radar mostra só preços reais.", file=sys.stderr)
     try:
         return args.func(args, settings, db)
     except ValueError as exc:
