@@ -94,7 +94,13 @@ def _price_bands(rows: list[dict]) -> None:
         r["band"] = "low" if r["best_cost"] <= low else ("high" if r["best_cost"] > high else "mid")
 
 
-def create_app(settings: Settings | None = None, with_scheduler: bool = False) -> FastAPI:
+DEFAULT_BASE_PATH = "/radar-milhas"
+
+
+def create_app(
+    settings: Settings | None = None, with_scheduler: bool = False, base_path: str = DEFAULT_BASE_PATH
+) -> FastAPI:
+    """Painel servido em `base_path` (ex.: http://localhost/radar-milhas); "/" redireciona para lá."""
     settings = settings or Settings.from_env()
     db = Database(settings.db_path)
     running: set[int] = set()
@@ -112,13 +118,22 @@ def create_app(settings: Settings | None = None, with_scheduler: bool = False) -
             task.cancel()
         db.close()
 
-    app = FastAPI(title="Radar de Milhas", lifespan=lifespan)
+    base = "/" + base_path.strip("/") if base_path.strip("/") else ""
+    root = FastAPI(title="Radar de Milhas", lifespan=lifespan)
+    app = FastAPI(title="Radar de Milhas") if base else root
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
-    app.state.db = db
-    app.state.settings = settings
+    root.state.db = app.state.db = db
+    root.state.settings = app.state.settings = settings
+    if base:
+        root.mount(base, app)
+
+        @root.get("/", include_in_schema=False)
+        async def go_to_panel():
+            return RedirectResponse(f"{base}/", status_code=307)
 
     def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLResponse:
         ctx.setdefault("settings", settings)
+        ctx.setdefault("base", base)
         return TEMPLATES.TemplateResponse(request, name, ctx, status_code=status_code)
 
     def is_running(watch_id: int) -> bool:
@@ -181,7 +196,7 @@ def create_app(settings: Settings | None = None, with_scheduler: bool = False) -
         except ValueError as exc:
             return render(request, "index.html", status_code=400, error=str(exc), form=dict(await request.form()),
                           **index_context())
-        return RedirectResponse(f"/watches/{watch.id}", status_code=303)
+        return RedirectResponse(f"{base}/watches/{watch.id}", status_code=303)
 
     def get_or_404(watch_id: int) -> Watch:
         watch = db.get_watch(watch_id)
@@ -230,7 +245,7 @@ def create_app(settings: Settings | None = None, with_scheduler: bool = False) -
             task = asyncio.create_task(job())
             background.add(task)
             task.add_done_callback(background.discard)
-        return RedirectResponse(f"/watches/{watch.id}", status_code=303)
+        return RedirectResponse(f"{base}/watches/{watch.id}", status_code=303)
 
     @app.post("/watches/{watch_id}/metas")
     async def update_targets(watch_id: int, meta_dinheiro: str = Form(""), meta_milhas: str = Form("")):
@@ -240,18 +255,18 @@ def create_app(settings: Settings | None = None, with_scheduler: bool = False) -
         except ValueError as exc:
             raise HTTPException(400, "Meta inválida") from exc
         db.update_targets(watch.id, cash, miles)
-        return RedirectResponse(f"/watches/{watch.id}#alertas", status_code=303)
+        return RedirectResponse(f"{base}/watches/{watch.id}#alertas", status_code=303)
 
     @app.post("/watches/{watch_id}/toggle")
     async def toggle(watch_id: int):
         watch = get_or_404(watch_id)
         db.set_watch_active(watch.id, not watch.active)
-        return RedirectResponse(f"/watches/{watch.id}", status_code=303)
+        return RedirectResponse(f"{base}/watches/{watch.id}", status_code=303)
 
     @app.post("/watches/{watch_id}/delete")
     async def delete(watch_id: int):
         get_or_404(watch_id)
         db.delete_watch(watch_id)
-        return RedirectResponse("/", status_code=303)
+        return RedirectResponse(f"{base}/", status_code=303)
 
-    return app
+    return root

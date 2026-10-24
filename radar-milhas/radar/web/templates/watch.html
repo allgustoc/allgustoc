@@ -69,7 +69,7 @@
 {%- endmacro %}
 
 {% block content %}
-<a class="crumb" href="/">← Seus radares</a>
+<a class="crumb" href="{{ base }}/">← Seus radares</a>
 <div class="radar-head">
   <div>
     <h1>{{ watch.origins | join(" ") }}<span class="arrow" aria-label="para">→</span>{{ watch.destinations | join(" ") }}</h1>
@@ -82,18 +82,18 @@
     </div>
   </div>
   <div class="actions">
-    <form class="inline" method="post" action="/watches/{{ watch.id }}/run">
+    <form class="inline" method="post" action="{{ base }}/watches/{{ watch.id }}/run">
       <button class="btn btn-primary" {% if running %}disabled{% endif %}>{{ "Buscando…" if running else "Buscar agora" }}</button>
     </form>
-    <form class="inline" method="post" action="/watches/{{ watch.id }}/toggle"><button class="btn btn-quiet">{{ "Pausar" if watch.active else "Reativar" }}</button></form>
-    <form class="inline" method="post" action="/watches/{{ watch.id }}/delete" onsubmit="return confirm('Excluir este radar e o histórico dele?')"><button class="btn btn-danger">Excluir</button></form>
+    <form class="inline" method="post" action="{{ base }}/watches/{{ watch.id }}/toggle"><button class="btn btn-quiet">{{ "Pausar" if watch.active else "Reativar" }}</button></form>
+    <form class="inline" method="post" action="{{ base }}/watches/{{ watch.id }}/delete" onsubmit="return confirm('Excluir este radar e o histórico dele?')"><button class="btn btn-danger">Excluir</button></form>
   </div>
 </div>
 
 {# ---------- estado da busca ---------- #}
 <section aria-live="polite">
 {% if running %}
-  <div class="notice working" data-status-url="/watches/{{ watch.id }}/status">
+  <div class="notice working" data-status-url="{{ base }}/watches/{{ watch.id }}/status">
     <h3>Buscando nos sites das companhias</h3>
     <p class="small muted">O bot abre a LATAM, a Smiles e a Azul como uma pessoa faria, uma data por vez. Leva alguns minutos; esta página atualiza sozinha.</p>
     <div class="progress-list">
@@ -108,7 +108,7 @@
   <div class="empty">
     <h2>Este radar ainda não buscou</h2>
     <p>Clique em <strong>Buscar agora</strong> para a primeira busca. Ela leva alguns minutos, porque o bot consulta cada data nos sites da LATAM, Smiles e Azul. Depois disso, ele busca sozinho todo dia às {{ settings.run_at }}.</p>
-    <form method="post" action="/watches/{{ watch.id }}/run"><button class="btn btn-primary">Buscar agora</button></form>
+    <form method="post" action="{{ base }}/watches/{{ watch.id }}/run"><button class="btn btn-primary">Buscar agora</button></form>
   </div>
 {% else %}
   {% for group in last.issues | groupby("stopped") %}
@@ -210,7 +210,7 @@
 {# ---------- alertas ---------- #}
 <section id="alertas">
   <div class="section-head"><h2>Alertas de preço</h2><p>Aviso por WhatsApp, Telegram ou e-mail; o mesmo alerta só volta se o preço cair mais 3% ou após 7 dias</p></div>
-  <form class="form-card" method="post" action="/watches/{{ watch.id }}/metas">
+  <form class="form-card" method="post" action="{{ base }}/watches/{{ watch.id }}/metas">
     <div class="grid-2">
       <div class="field"><label for="meta_dinheiro">Me avise abaixo de (R$, por pessoa, ida e volta)</label><input id="meta_dinheiro" name="meta_dinheiro" inputmode="decimal" placeholder="Ex.: 4500" value="{{ '%.0f' | format(watch.target_cash_brl) if watch.target_cash_brl else '' }}"></div>
       <div class="field"><label for="meta_milhas">Me avise abaixo de (milhas, por pessoa, ida e volta)</label><input id="meta_milhas" name="meta_milhas" inputmode="numeric" placeholder="Ex.: 140000" value="{{ watch.target_miles or '' }}"></div>

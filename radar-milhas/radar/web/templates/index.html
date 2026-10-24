@@ -10,7 +10,7 @@
 
 <div class="radar-list mt-5">
   {% for item in watches %}{% set w = item.watch %}{% set last = item.last %}
-  <a class="radar-row" href="/watches/{{ w.id }}">
+  <a class="radar-row" href="{{ base }}/watches/{{ w.id }}">
     <div>
       <div class="route">{{ w.origins | join(" ") }}<span class="arrow" aria-label="para">→</span>{{ w.destinations | join(" ") }}</div>
       <div class="small muted">{{ w.name }} · {{ w.start_date | dmy }} a {{ w.end_date | dmy }}</div>
@@ -45,7 +45,7 @@
 
   {% if error %}<div class="notice error mb-4" role="alert" id="form-error"><h3>Não deu para criar o radar</h3><p>{{ error }}</p></div>{% endif %}
   {% set f = form or {} %}
-  <form class="form-card" method="post" action="/watches" {% if error %}aria-describedby="form-error"{% endif %}>
+  <form class="form-card" method="post" action="{{ base }}/watches" {% if error %}aria-describedby="form-error"{% endif %}>
     <fieldset>
       <legend>Rota</legend>
       <div class="grid-2">

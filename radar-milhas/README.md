@@ -54,13 +54,18 @@ radar diagnostico --origem CNF --destino LIS --data 2027-05-28
 radar web --agendar
 ```
 
-Abra **http://localhost:8000**. (No PowerShell, ative com `.venv\Scripts\Activate.ps1`.)
+Abra **http://localhost/radar-milhas**. (No PowerShell, ative com `.venv\Scripts\Activate.ps1`.)
+
+O painel usa a porta 80, então o endereço não leva número. Se a porta 80 estiver ocupada por outro
+programa, o bot avisa e usa a 8000: http://localhost:8000/radar-milhas. O endereço certo sempre aparece
+na janela do terminal, que precisa ficar aberta enquanto você usa o painel. Opções: `radar web --porta 8080`
+e `radar web --caminho /` (painel na raiz).
 
 ### Deixar o painel sempre aberto (Windows)
 
 Na pasta `radar-milhas\windows`:
 
-- **`iniciar-radar.bat`**: dê dois cliques. Abre o painel em http://localhost:8000, faz a busca diária no
+- **`iniciar-radar.bat`**: dê dois cliques. Abre o painel em http://localhost/radar-milhas, faz a busca diária no
   horário configurado e reinicia sozinho se parar. Para encerrar, feche a janela preta.
 - **`ativar-inicio-automatico.bat`**: faz o radar abrir sozinho (minimizado) toda vez que você entrar no
   Windows. Para desfazer, use `desativar-inicio-automatico.bat`.

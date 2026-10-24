@@ -210,9 +210,35 @@ def cmd_web(args, settings, db) -> int:
     from .web.app import create_app
 
     db.close()
-    app = create_app(settings, with_scheduler=args.agendar)
-    uvicorn.run(app, host=args.host, port=args.porta, log_level="info")
+    port = args.porta
+    if not _port_free(args.host, port):
+        fallback = 8000 if port != 8000 else 8080
+        print(f"A porta {port} está ocupada ou bloqueada neste computador; usando a porta {fallback}.")
+        port = fallback
+    base = "/" + args.caminho.strip("/") if args.caminho.strip("/") else ""
+    shown_host = "localhost" if args.host in ("127.0.0.1", "0.0.0.0") else args.host
+    url = f"http://{shown_host}{'' if port == 80 else f':{port}'}{base}/"
+    print(f"\nPainel do Radar de Milhas: {url}")
+    print("Deixe esta janela aberta enquanto usar o painel.\n")
+    if args.abrir:
+        import threading
+        import webbrowser
+
+        threading.Timer(2.0, webbrowser.open, [url]).start()
+    app = create_app(settings, with_scheduler=args.agendar, base_path=base)
+    uvicorn.run(app, host=args.host, port=port, log_level="warning")
     return 0
+
+
+def _port_free(host: str, port: int) -> bool:
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        try:
+            sock.bind((host, port))
+        except OSError:
+            return False
+    return True
 
 
 def cmd_daemon(args, settings, db) -> int:
@@ -292,7 +318,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     w = sub.add_parser("web", help="Painel web para cadastrar e acompanhar radares")
     w.add_argument("--host", default="127.0.0.1")
-    w.add_argument("--porta", type=int, default=8000)
+    w.add_argument("--porta", type=int, default=80, help="Padrão 80 (endereço sem número de porta)")
+    w.add_argument("--abrir", action="store_true", help="Abre o painel no navegador ao iniciar")
+    w.add_argument("--caminho", default="/radar-milhas", help="Caminho do painel no endereço (padrão /radar-milhas)")
     w.add_argument("--agendar", action="store_true", help="Também roda a busca diária no horário RADAR_RUN_AT")
     w.set_defaults(func=cmd_web)
 
