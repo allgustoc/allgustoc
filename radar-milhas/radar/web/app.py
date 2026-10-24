@@ -10,9 +10,11 @@ from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ..airports import GROUPS, airport_name, country_flag, expand_airports
 from ..alerts import evaluate
@@ -22,6 +24,7 @@ from ..models import CABINS, FareKind, Watch, program_label
 from ..notifier import brl, fmt_date, miles_fmt
 from ..providers import PROVIDER_LABELS
 from ..runner import PROGRESS, analyze_watch, run_all
+from .server import MARKER_HEADER
 
 log = logging.getLogger(__name__)
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -124,6 +127,24 @@ def create_app(
     app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
     root.state.db = app.state.db = db
     root.state.settings = app.state.settings = settings
+    @root.middleware("http")
+    async def mark_responses(request: Request, call_next):
+        response = await call_next(request)
+        response.headers[MARKER_HEADER] = "1"
+        return response
+
+    async def not_found(request: Request, exc: StarletteHTTPException):
+        if exc.status_code != 404 or "text/html" not in request.headers.get("accept", ""):
+            return await http_exception_handler(request, exc)
+        return HTMLResponse(
+            f'<!doctype html><meta charset="utf-8"><title>Radar de Milhas</title>'
+            f'<p style="font-family:system-ui;padding:2rem">Página não encontrada no Radar de Milhas. '
+            f'<a href="{base}/">Ir para o painel</a></p>',
+            status_code=404,
+        )
+
+    for target in {id(root): root, id(app): app}.values():
+        target.add_exception_handler(StarletteHTTPException, not_found)
     if base:
         root.mount(base, app)
 

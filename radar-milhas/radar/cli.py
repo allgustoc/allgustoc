@@ -208,37 +208,31 @@ def cmd_web(args, settings, db) -> int:
     import uvicorn
 
     from .web.app import create_app
+    from .web.server import bind_sockets, report_after_start
 
     db.close()
     port = args.porta
-    if not _port_free(args.host, port):
-        fallback = 8000 if port != 8000 else 8080
-        print(f"A porta {port} está ocupada ou bloqueada neste computador; usando a porta {fallback}.")
-        port = fallback
+    socks = bind_sockets(args.host, port)
+    if socks is None:
+        for fallback in (8000, 8080, 8765):
+            socks = bind_sockets(args.host, fallback) if fallback != port else None
+            if socks:
+                print(f"A porta {port} já está em uso por outro programa neste computador; usando a porta {fallback}.")
+                port = fallback
+                break
+        else:
+            print(f"Não foi possível usar a porta {port}. Tente: radar web --porta 9000")
+            return 1
     base = "/" + args.caminho.strip("/") if args.caminho.strip("/") else ""
-    shown_host = "localhost" if args.host in ("127.0.0.1", "0.0.0.0") else args.host
-    url = f"http://{shown_host}{'' if port == 80 else f':{port}'}{base}/"
+    port_part = "" if port == 80 else f":{port}"
+    shown_host = "localhost" if args.host in ("127.0.0.1", "0.0.0.0", "localhost") else args.host
+    url = f"http://{shown_host}{port_part}{base}/"
     print(f"\nPainel do Radar de Milhas: {url}")
     print("Deixe esta janela aberta enquanto usar o painel.\n")
-    if args.abrir:
-        import threading
-        import webbrowser
-
-        threading.Timer(2.0, webbrowser.open, [url]).start()
+    report_after_start(url, f"http://127.0.0.1{port_part}{base}/", args.abrir)
     app = create_app(settings, with_scheduler=args.agendar, base_path=base)
-    uvicorn.run(app, host=args.host, port=port, log_level="warning")
+    uvicorn.Server(uvicorn.Config(app, log_level="warning")).run(sockets=socks)
     return 0
-
-
-def _port_free(host: str, port: int) -> bool:
-    import socket
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        try:
-            sock.bind((host, port))
-        except OSError:
-            return False
-    return True
 
 
 def cmd_daemon(args, settings, db) -> int:

@@ -61,6 +61,11 @@ programa, o bot avisa e usa a 8000: http://localhost:8000/radar-milhas. O endere
 na janela do terminal, que precisa ficar aberta enquanto você usa o painel. Opções: `radar web --porta 8080`
 e `radar web --caminho /` (painel na raiz).
 
+Se o navegador mostrar "Not Found" com outra aparência, quem respondeu foi outro programa do Windows que
+usa a porta 80 (como o IIS). O painel confere isso ao iniciar e, se for o caso, avisa na janela e abre o
+endereço que funciona (por exemplo http://127.0.0.1/radar-milhas). O "não encontrado" do próprio painel
+traz um link "Ir para o painel".
+
 ### Deixar o painel sempre aberto (Windows)
 
 Na pasta `radar-milhas\windows`:
