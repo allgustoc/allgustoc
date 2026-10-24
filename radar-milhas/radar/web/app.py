@@ -52,8 +52,8 @@ TEMPLATES.env.filters["short_brl"] = short_brl
 
 HINTS = (
     ("não está instalado", "Instale o navegador: pip install playwright e depois python -m playwright install chromium."),
-    ("bloqueou", "O site pediu verificação antirrobô. Deixe RADAR_BROWSER_HEADLESS=false, rode a busca de novo e, "
-                 "se aparecer um desafio na janela do navegador, resolva uma vez. Os cookies ficam salvos."),
+    ("bloqueou", "Este site não permite acesso automatizado. Para dados confiáveis, use as fontes por API: "
+                 "serpapi (dinheiro, Google Flights) e seats_aero (milhas). Veja o README."),
     ("formato de resposta inesperado", "O site mudou o formato. Rode radar diagnostico e envie os arquivos de "
                                        "data/debug para ajustar o conector."),
     ("não retornou resultados", "A página não carregou a busca a tempo. Tente de novo; se repetir, aumente "

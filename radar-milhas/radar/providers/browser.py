@@ -9,8 +9,10 @@ persistente (RADAR_BROWSER_PROFILE_DIR), então cookies e eventual login são ma
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -83,6 +85,17 @@ class BrowserSession:
             first_line = text.strip().splitlines()[0] if text.strip() else type(exc).__name__
             raise ProviderError(f"não foi possível abrir o navegador: {first_line[:200]}", transient=False) from exc
 
+    def _save_failure(self, page_png: bytes | None, netlog: list[dict], url: str, reason: str) -> str:
+        """Guarda captura de tela e requisições vistas, para entender por que a busca falhou."""
+        folder = Path(self.settings.debug_dump_dir or "data/debug")
+        folder.mkdir(parents=True, exist_ok=True)
+        base = folder / f"{self.profile}-falha-{datetime.now():%Y%m%d-%H%M%S}"
+        if page_png:
+            base.with_suffix(".png").write_bytes(page_png)
+        payload = {"motivo": reason, "url": url, "requisicoes": netlog}
+        base.with_suffix(".json").write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return str(base)
+
     async def capture(self, url: str, matcher: Callable[[str], bool], timeout: float | None = None) -> list[Captured]:
         """Abre `url` e devolve as respostas JSON cujas URLs satisfazem `matcher`."""
         timeout = timeout or self.settings.browser_timeout
@@ -91,8 +104,12 @@ class BrowserSession:
             page = await ctx.new_page()
             captured: list[Captured] = []
             pending: list[asyncio.Task] = []
+            netlog: list[dict] = []
 
             async def handle(response):
+                if response.request.resource_type in ("xhr", "fetch", "document"):
+                    netlog.append({"url": response.url[:300], "status": response.status,
+                                   "tipo": response.headers.get("content-type", "")[:60]})
                 if response.request.method == "OPTIONS" or not matcher(response.url):
                     return
                 try:
@@ -125,18 +142,22 @@ class BrowserSession:
                         text = ((await page.title()) + " " + (await page.inner_text("body"))[:2000]).lower()
                     except Exception:
                         pass
-                    if any(c.status in (403, 429) for c in captured) or any(m in text for m in BLOCK_MARKERS):
-                        raise ProviderBlocked(f"{self.profile}: o site bloqueou a automação (antirrobô/captcha)")
+                    blocked = any(c.status in (403, 429) for c in captured) or any(m in text for m in BLOCK_MARKERS)
+                    try:
+                        png = await page.screenshot()
+                    except Exception:
+                        png = None
+                    saved = self._save_failure(png, netlog, url, "bloqueado" if blocked else "sem resposta")
+                    if blocked:
+                        raise ProviderBlocked(f"o site bloqueou o acesso automatizado. Detalhes em {saved}.png")
+                    raise ProviderError(f"o site não retornou resultados em {timeout:.0f}s. Detalhes em {saved}.png")
             except ProviderError:
                 raise
             except Exception as exc:
-                raise ProviderError(f"{self.profile}: falha no navegador: {exc}") from exc
+                raise ProviderError(f"falha no navegador: {str(exc).splitlines()[0][:200]}") from exc
             finally:
                 await page.close()
-            ok = [c for c in captured if c.body is not None and c.status < 400]
-            if not ok:
-                raise ProviderError(f"{self.profile}: o site não retornou resultados em {timeout:.0f}s")
-            return ok
+            return [c for c in captured if c.body is not None and c.status < 400]
 
     async def get_json(self, url: str, headers: dict[str, str]) -> Any:
         """GET reaproveitando cookies do navegador (ex.: taxas de embarque da Smiles)."""

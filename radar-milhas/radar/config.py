@@ -93,7 +93,7 @@ class Settings:
     seats_aero_sources: str = ""
 
     # Navegador (Smiles / LATAM / Azul)
-    # Janela visível por padrão: os sites bloqueiam navegadores "invisíveis" com mais frequência.
+    # Janela visível por padrão, para você acompanhar o que o bot faz no seu computador.
     browser_headless: bool = False
     browser_profile_dir: str = "data/browser"
     browser_executable: str = ""

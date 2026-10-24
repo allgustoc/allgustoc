@@ -59,6 +59,7 @@ def _session(settings, tmp_path):
     settings.browser_profile_dir = str(tmp_path / "profile")
     settings.browser_timeout = 15
     settings.browser_headless = True
+    settings.debug_dump_dir = str(tmp_path / "debug")
     settings.browser_executable = os.environ.get("RADAR_BROWSER_EXECUTABLE", "")
     return BrowserSession(settings, "teste")
 
@@ -92,10 +93,14 @@ def test_block_page_raises(server, settings, tmp_path):
     with pytest.raises(ProviderBlocked):
         try:
             asyncio.run(go())
+        except ProviderBlocked:
+            raise
         except Exception as exc:
-            if "Executable doesn't exist" in str(exc):
+            if "não está instalado" in str(exc) or "Executable doesn't exist" in str(exc):
                 pytest.skip("Chromium do Playwright não instalado")
             raise
+    saved = list((tmp_path / "debug").glob("teste-falha-*"))
+    assert {p.suffix for p in saved} == {".png", ".json"}
 
 
 def test_missing_chromium_gives_install_hint(settings, tmp_path):

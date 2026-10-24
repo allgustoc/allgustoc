@@ -54,8 +54,18 @@ radar diagnostico --origem CNF --destino LIS --data 2027-05-28
 radar web --agendar
 ```
 
-Abra **http://localhost:8000**. Nas próximas vezes basta `cd allgustoc\radar-milhas`,
-`.venv\Scripts\activate.bat` e `radar web --agendar`. (No PowerShell, ative com `.venv\Scripts\Activate.ps1`.)
+Abra **http://localhost:8000**. (No PowerShell, ative com `.venv\Scripts\Activate.ps1`.)
+
+### Deixar o painel sempre aberto (Windows)
+
+Na pasta `radar-milhas\windows`:
+
+- **`iniciar-radar.bat`**: dê dois cliques. Abre o painel em http://localhost:8000, faz a busca diária no
+  horário configurado e reinicia sozinho se parar. Para encerrar, feche a janela preta.
+- **`ativar-inicio-automatico.bat`**: faz o radar abrir sozinho (minimizado) toda vez que você entrar no
+  Windows. Para desfazer, use `desativar-inicio-automatico.bat`.
+
+O computador precisa estar ligado no horário da busca (`RADAR_RUN_AT`, padrão 07:00).
 
 ### Mac / Linux
 
@@ -82,11 +92,20 @@ próprios sites num navegador (Chromium) e lê as tarifas que o site recebe, com
 | `serpapi` | Dinheiro (TAP, Iberia, Air Europa, todas) | API do Google Flights via [SerpApi](https://serpapi.com/google-flights-api), `SERPAPI_KEY` | Plano gratuito limitado |
 | `seats_aero` | Milhas (Smiles, Azul e outros) | [seats.aero](https://seats.aero) Partner API, `SEATS_AERO_KEY` | Plano Pro |
 
-Padrão: `RADAR_PROVIDERS=latam,smiles,azul`. Para incluir TAP e Iberia em dinheiro, acrescente `serpapi`.
+Padrão: `RADAR_PROVIDERS=latam,smiles,azul`.
 
-O navegador abre numa janela visível (`RADAR_BROWSER_HEADLESS=false`), porque os sites bloqueiam
-navegadores invisíveis com mais frequência. Se aparecer uma verificação antirrobô, resolva uma vez na
-janela: os cookies ficam salvos em `data/browser/`.
+**Atenção:** LATAM, Azul e, às vezes, Smiles têm proteção antirrobô e podem bloquear o acesso
+automatizado. Quando isso acontece, o bot para aquela fonte, mostra o aviso no painel e salva uma captura
+da tela em `data/debug/`; ele **não** tenta burlar a proteção. Para ter dados confiáveis todo dia, use as
+fontes por API, feitas para acesso automatizado:
+
+- **Dinheiro:** crie uma conta gratuita na [SerpApi](https://serpapi.com/users/sign_up), copie a chave para
+  `SERPAPI_KEY` e acrescente `serpapi` em `RADAR_PROVIDERS`. Cobre TAP, LATAM, Azul, Iberia e Air Europa.
+- **Milhas:** assine o plano Pro do [seats.aero](https://seats.aero), gere a chave da Partner API em
+  `SEATS_AERO_KEY` e acrescente `seats_aero`.
+
+Exemplo: `RADAR_PROVIDERS=serpapi,seats_aero,smiles`. Cada consulta conta no limite do plano; ajuste
+`RADAR_MAX_SEARCHES_PER_PROVIDER` e a janela de datas para caber nele.
 
 ### Diagnóstico
 
